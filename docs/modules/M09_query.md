@@ -49,9 +49,10 @@ section_hints:            # words that narrow narrative search to sections
 ### `llm/base.py`
 - **Does:** `LLMClient` protocol: `generate(system: str, prompt: str, json_schema: dict | None) -> LLMResponse(text, model, prompt_version, latency_ms)`.
 
-### `llm/ollama.py`
-- **Process:** POST `{base_url}/api/generate` with `stream: false`, `options: {temperature, num_ctx}`, `format: <json_schema>` when given; timeout and retries from config; health check `ping()`.
+### `llm/openai_compat.py`
+- **Process:** any OpenAI-compatible server (LM Studio by default; Ollama also works at its own `/v1` URL). `POST {base_url}/chat/completions` with `model`, `temperature`, `messages` (system + user), `stream: false`. When `json_schema` is given, send it via `response_format` (`{"type": "json_schema", ...}`); if the server rejects `response_format` or the reply is not valid JSON for the schema, retry **once** with the schema stated in the prompt, then validate the JSON; still invalid → `LLMUnavailable`-style failure handled by callers. `num_ctx` is a server-side/model-load setting for these servers; it is validated against config and logged, not sent unless the server is known to accept it (TODO: confirm for LM Studio). Timeout and retries from config. `ping()` calls `GET {base_url}/models` and checks that `llm.model` is listed.
 - **Output:** `LLMResponse`. Errors → `LLMUnavailable` (callers fall back to the template-only answer).
+- **Hardware note:** only one GPU model is loaded at a time (OCR during ingestion, LLM at query time); target model is a 3–4B instruct GGUF.
 
 ### `llm/fake.py`
 - **Does:** deterministic fake client for tests (returns canned responses keyed by prompt hash).
@@ -92,8 +93,13 @@ section_hints:            # words that narrow narrative search to sections
 
 ### `query/planner.py`
 - **Input:** `Intent`.
-- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest` (isin, fiscal years covering the periods, sections from hints or default `[mdna, directors_report, notes]`, query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
-- **Output:** `Plan` (logged as JSON).
+- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest`s (isin, fiscal years covering the periods, sections from hints or default `[mdna, directors_report, notes]`, query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
+- **Source order by period type** (period components from `core.fiscal.components_of`):
+  - **Quarter (Q):** (1) transcripts for that quarter (`source_types=["transcript"]`); then (2) annual-report whitelisted sections, only to fill the remaining `max_chunks_in_prompt` slots if transcript hits don't fill them (or none exist).
+  - **Half-year / nine-month (H, 9M):** transcripts for **every quarter inside the period** (H1 = Q1 + Q2 calls, 9M = Q1–Q3), not just the latest. Annual-report sections are searched **only if the period ends at the fiscal year-end** (i.e. never for H1 or 9M; an H2 question ends at year-end and does include them).
+  - **Fiscal year (FY):** all four quarterly transcripts plus annual-report whitelisted sections, searched together.
+  - Within a source type, results are ranked by relevance (RRF), not by quarter; each hit keeps the quarter (`period_label`) it came from. Explicit `section_hints` (e.g. auditor) go straight to annual-report sections.
+- **Output:** `Plan` (logged as JSON, including the source order).
 
 ### `query/retriever.py`
 - **Process:** execute the plan via `metrics.query`, `facts.current_view`, `narrative.search`; include `not_computed` metrics with their reasons.
@@ -112,7 +118,7 @@ section_hints:            # words that narrow narrative search to sections
 
 ### `query/postcheck.py`
 - **Process:** split explanation into sentences; for each: must cite ≥1 alias (if `require_citation_per_sentence`); all cited aliases must exist in evidence; if `numeric_check_enabled`, every number in the sentence must match a formatted value of a cited alias — otherwise drop the sentence. Record dropped sentences and reasons.
-- **Output:** final `Answer` with `citations` mapped back to real IDs (fact IDs, metric value IDs, chunk IDs → filing + page) and `warnings`.
+- **Output:** final `Answer` with `citations` mapped back to real IDs (fact IDs, metric value IDs, chunk IDs → filing + page) and `warnings`. **Each chunk citation records its `source_type`** (`transcript` | `annual_report` | `results`), the **quarter/period it came from** (`period_label`, e.g. Q1 FY27) and, for transcripts, the speaker, role and firm, so the answer can say e.g. "(earnings call, CFO)" vs "(annual report, MD&A p. 42)".
 
 ### `query/service.py`
 - **Does:** `ask(question) -> Answer | Clarification`; writes `query_log` (question, intent, plan, retrieved IDs, prompt version, model, answer, cited IDs, post-check result). `feedback(query_id, correct: bool, note)`.
@@ -128,9 +134,12 @@ section_hints:            # words that narrow narrative search to sections
 5. Post-check drops a sentence with no citation, one citing an unknown alias, and one with a number not matching its cited fact.
 6. No chunks retrieved → answer contains numbers block + "No explanation found…" and no LLM call is made.
 7. `not_computed` metric → answer shows the reason (e.g. blocked by `cash_ties_to_bs`).
-8. Ollama down → numbers-only answer with a warning, no crash.
+8. LLM server down (`ping()` fails or connection refused) → numbers-only answer with a warning, no crash. Mocked HTTP tests also cover: `response_format` rejected → one retry with the schema in the prompt; invalid JSON twice → discarded.
 9. Every `ask` writes one `query_log` row with plan and citations.
 10. Basis default is stated in every answer.
+11. Planner: a quarterly "why" question produces a transcript-first plan with annual-report fallback; an H1 question searches the Q1 and Q2 transcripts and no annual report; a 9M question the Q1–Q3 transcripts and no annual report; an FY question all four quarterly transcripts plus annual-report sections; the plan JSON shows the order and the quarters.
+12. With both transcript and annual-report chunks available for a quarterly question, transcript chunks are ranked into the prompt first; annual-report chunks appear only to fill remaining slots. With no transcripts indexed, the annual-report fallback is used and the answer notes that no transcript was available.
+13. Every chunk citation in `Answer.citations` carries `source_type` and the quarter it came from (and speaker/role/firm for transcripts); a multi-quarter answer shows different quarters on different citations.
 
 ## Out of scope
 Multi-company comparison, conversational memory across questions, shenanigan explanations.

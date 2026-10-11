@@ -18,7 +18,8 @@ The later goal (deferred) is to flag possible financial shenanigans. Everything 
 - Indian companies listed on NSE/BSE, on the user's watch list (grows over time).
 - Ind AS filings, roughly FY2021 onward (3–5 years, configurable).
 - Quarterly/half-yearly/annual financial results (XBRL preferred, PDF fallback).
-- Annual reports (PDF) for narrative: MD&A, Directors' Report, Notes, Auditor's Report.
+- Annual reports (PDF) for narrative: MD&A, Directors' Report, Notes, Auditor's Report (whitelisted sections only — see `narrative.annual_report_sections_include`).
+- Earnings call transcripts (PDF) as the primary narrative source for quarterly "why" questions.
 - Derived metrics from a declarative registry.
 - Question answering with citations to facts and pages.
 - Periodic refresh, with alerts if access terms allow.
@@ -79,17 +80,19 @@ The later goal (deferred) is to flag possible financial shenanigans. Everything 
 | Dataframes | `pandas` (only at edges: parsing, UI) | Core logic uses dataclasses/pydantic |
 | XBRL | `lxml` | Exchange XBRL instance files are plain XML |
 | PDF text | `pymupdf` (fitz) | Page-level text with coordinates |
-| PDF tables | `pdfplumber`; OCR fallback `pytesseract` | OCR only for scanned pages |
+| PDF tables | `pdfplumber`; OCR fallback via `OcrBackend`: `pytesseract` (default) or Chandra through an OpenAI-compatible vision endpoint | OCR only for scanned pages; backend chosen by `parsing.ocr.backend` |
 | Fuzzy match | `rapidfuzz` | |
 | Keyword search | `rank_bm25` | |
 | Embeddings | `sentence-transformers` (local model) | Model name in config |
 | Vector index | `numpy` brute force; `faiss-cpu` optional via config | Watch-list scale is small |
-| LLM | Ollama over HTTP via `httpx` | Behind an interface; swappable |
+| LLM | Any OpenAI-compatible local server over HTTP via `httpx`; LM Studio by default | Behind an interface; swappable. Ollama works at its own `/v1` URL |
 | CLI | `typer` | Single entry point `finrag` |
 | UI | Streamlit | Single-user |
 | Tests | `pytest`, `pytest-mock` | |
 | Lint/format | `ruff` | |
 | Logging | stdlib `logging`, JSON lines to file | |
+
+**Target machine:** RTX 4050 laptop (6 GB VRAM), 16 GB RAM, Windows. Only one GPU model is loaded at a time (OCR during ingestion, LLM at query time). The embedding model runs on CPU (`narrative.embedding_device: cpu`).
 
 Do not add other dependencies without asking.
 
@@ -124,7 +127,7 @@ finrag/
 │   ├── validation/    (M06)
 │   ├── metrics/       (M07)
 │   ├── narrative/     (M08)
-│   ├── llm/           (M09)
+│   ├── llm/           (M09)  base, openai_compat (any OpenAI-compatible server), fake
 │   ├── query/         (M09)
 │   ├── scheduler/     (M10)
 │   ├── app/           (M11)
@@ -177,14 +180,14 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 **corporate_events** — `id INTEGER PK, isin TEXT FK, event_type TEXT (rename|merger|demerger|delisting|basis_change), event_date TEXT, details TEXT, source TEXT`
 
 ### 7.2 Ingestion
-**filings** — `filing_id TEXT PK, isin TEXT FK, source TEXT, filing_type TEXT, submission TEXT (original|revision), revision_no INTEGER, taxonomy_family TEXT (indas|banking|other), basis TEXT, period_start TEXT, period_end TEXT, period_type TEXT, filed_on TEXT, source_url TEXT, raw_path TEXT, sha256 TEXT UNIQUE, format TEXT (xbrl|pdf), status TEXT (fetched|parsed|normalized|failed), error TEXT, created_at TEXT`
+**filings** — `filing_id TEXT PK, isin TEXT FK, source TEXT, filing_type TEXT (financial_results|annual_report|earnings_call_transcript), submission TEXT (original|revision), revision_no INTEGER, taxonomy_family TEXT (indas|banking|other), basis TEXT, period_start TEXT, period_end TEXT, period_type TEXT, filed_on TEXT, source_url TEXT, raw_path TEXT, sha256 TEXT UNIQUE, format TEXT (xbrl|pdf), status TEXT (fetched|parsed|normalized|failed), error TEXT, created_at TEXT`
 
 ### 7.3 Facts
-**parsed_facts** — raw values as extracted: `id INTEGER PK, filing_id FK, concept_raw TEXT, label_raw TEXT, period_start, period_end, basis, value TEXT, unit_raw TEXT, scale INTEGER, decimals INTEGER, source_loc TEXT, extractor TEXT (xbrl|pdf_table|ocr), confidence REAL`
+**parsed_facts** — raw values as extracted: `id INTEGER PK, filing_id FK, concept_raw TEXT, label_raw TEXT, period_start, period_end, basis, value TEXT, unit_raw TEXT, scale INTEGER, decimals INTEGER, source_loc TEXT, extractor TEXT (xbrl|pdf_table|ocr), ocr_backend TEXT NULL (tesseract|chandra; set only when extractor = ocr), confidence REAL`
 
 **canonical_facts** (append-only) — `fact_id TEXT PK, isin, concept TEXT, period_start, period_end, period_type, basis, value TEXT, unit TEXT, source_filing_id FK, parsed_fact_id FK, mapping_method TEXT (standard|label|manual), is_derived INTEGER, derivation_json TEXT, filed_on TEXT, created_at`
 
-**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
+**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
 
 **restatements** — `id INTEGER PK, isin, concept, period_start, period_end, basis, old_fact_id, new_fact_id, abs_diff TEXT, rel_diff TEXT, flagged INTEGER, created_at`
 
@@ -194,7 +197,8 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 **metric_values** — `metric_value_id TEXT PK, isin, metric_id TEXT, formula_version TEXT, period_start, period_end, period_type, basis, value TEXT NULL, status TEXT (computed|not_computed), reason TEXT, input_fact_ids_json TEXT, run_id TEXT, created_at`
 
 ### 7.5 Narrative
-**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at`
+**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, source_type TEXT (annual_report|transcript|results), speaker TEXT NULL, speaker_role TEXT NULL (management|analyst|moderator), page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at`
+`speaker` and `speaker_role` are set only for transcript chunks. Transcript `section` ∈ {`prepared_remarks`, `qa`, `closing_remarks`}.
 Embeddings and BM25 indexes live under `data/indexes/`, keyed by `chunk_id`.
 
 ### 7.6 Query and operations

@@ -4,7 +4,7 @@ Update this file at the end of every module. Newest entry at the bottom.
 
 | Module | Status | Date | Notes / deviations from spec |
 |---|---|---|---|
-| M00 Foundation | not started | | |
+| M00 Foundation | done, awaiting review | 2026-10-11 | Built all `core/` files, `cli.py`, `pyproject.toml`; 66 tests pass, `ruff check` clean. Deviations and assumptions in "M00 notes" below. |
 | M01 Watch list | not started | | |
 | M02 Ingestion | not started | | |
 | M03 Parsing | not started | | |
@@ -16,6 +16,21 @@ Update this file at the end of every module. Newest entry at the bottom.
 | M09 Query + LLM | not started | | |
 | M10 Scheduler | not started | | |
 | M11 UI | not started | | |
+
+## M00 notes (2026-10-11)
+Assumptions and small additions beyond the spec text, all approved in review unless marked (new):
+- **Fiscal labels:** a fiscal year is labelled by the calendar year in which it ends, for any `fy_start_month` (April FY26 = Apr 2025–Mar 2026; January FY26 = calendar 2026). Two-digit labels are read as 20yy. The label parse regex is derived from `fiscal.fy_label_format`.
+- **`components_of(period)`** returns discrete quarters (FY → Q1..Q4, H1 → Q1,Q2, H2 → Q3,Q4, 9M → Q1..Q3; `[]` for a quarter). **`cumulative_steps(period)`** returns one-step `Identity` objects: H1 = Q1+Q2, 9M = H1+Q3, FY = 9M+Q4, H2 = FY−H1. (new) It also returns the discrete-quarter identities Q2 = H1−Q1, Q3 = 9M−H1, Q4 = FY−9M, which MASTER_BUILD §8.5 needs for derived quarters.
+- **Review fixes (2026-10-11):** `label_to_period` accepts the space-less form (`Q1FY27`, `H2FY26`, `9MFY26`); `period_to_label` still outputs the spaced form. `cumulative_steps` now returns every route, fewest derived inputs first: FY = 9M+Q4, then FY = H1+H2; Q4 = FY−9M, then Q4 = H2−Q3. H2 counts as a derived input because it is never filed directly. Ranking is structural only: M05 must filter routes by which periods it actually has (e.g. no Q3 or 9M filings in the real data).
+- **Env overrides:** only allowlisted secret keys (`alerts.email.password` → `FINRAG_ALERTS__EMAIL__PASSWORD`). Any other `FINRAG_*` variable is a `ConfigError` naming the variable. `alerts.email.password` is a model field defaulting to `""`; it is not in `settings.yaml`.
+- **Strict settings:** unknown keys are rejected (`extra="forbid"`). Blank `[VERIFY]` values load fine; the module that needs one must fail clearly when it is still blank.
+- **`finrag init`** creates only missing folders (data, raw, processed, indexes, reference, inbox, logs) and missing tables; it never modifies existing files (tested).
+- **Dependencies:** base = pydantic, pyyaml, sqlalchemy, typer; `dev` = pytest, pytest-mock, ruff. Heavy packages are optional extras by module: `parsing`, `narrative`, `ui`, `llm`, plus (new) `watchlist` (rapidfuzz), `ingestion` (httpx, lxml) and `faiss`. Install each only when its module is built.
+- **Schema (new):** `schema_version` table (constant `SCHEMA_VERSION = 1` in `db.py`); foreign keys only where the §7 text says FK, enforced via `PRAGMA foreign_keys=ON`; extra indexes on `filings`, `parsed_facts`, `canonical_facts`, `metric_values`, `chunks` (no column changes). `canonical_facts` append-only is not enforced by triggers yet — propose in M05 if wanted.
+- **`JobStatus`** enum (running | succeeded | failed) added to `core/types.py` for the `jobs` table (new).
+- **Logging** configures the `finrag` logger (propagate off), not Python's root logger, so other libraries' logs don't land in `finrag.log`.
+- **Tests** use an autouse fixture that copies `settings.yaml` into a temp repo root, so tests never touch the real `data/`. `INSTANT` periods have no fiscal label and `shift_period` rejects them.
+- Ran `finrag init` once on the real repo: created `data/raw`, `processed`, `indexes`, `logs` and `data/finrag.db`; `data/inbox` and `data/reference` were left as they were.
 
 ## Findings from real data
 Record anything learned from real filings that affects the design (formats, missing

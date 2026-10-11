@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finrag"
+version = "0.1.0"
+description = "Local financial-statement understanding for Indian listed companies"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "typer>=0.12",
+]
+
+# Heavy packages are declared per module and installed only when that module is built.
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "ruff"]
+watchlist = ["rapidfuzz"]
+ingestion = ["httpx", "lxml"]
+parsing = ["lxml", "pandas", "pdfplumber", "pymupdf", "pytesseract"]
+narrative = ["numpy", "rank_bm25", "rapidfuzz", "sentence-transformers"]
+faiss = ["faiss-cpu"]
+llm = ["httpx"]
+ui = ["pandas", "streamlit"]
+
+[project.scripts]
+finrag = "finrag.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --strict-markers"
+markers = ["golden: uses real filings under tests/golden (skipped when empty)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

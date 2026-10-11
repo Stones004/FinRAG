@@ -1,0 +1,101 @@
+# M07 — Metrics Engine and Registry
+
+**Package:** `src/finrag/metrics/` · **Depends on:** M06 · **Tests:** `tests/m07_metrics/`
+
+## Purpose
+Compute derived metrics deterministically from canonical facts, using formulas declared in `config/metrics.yaml`. Every value records its formula version and input fact IDs. If a metric can't be computed, store `not_computed` with a reason. The LLM never sees or applies formulas.
+
+## `config/metrics.yaml` structure
+```yaml
+version: 1
+metrics:
+  operating_margin:
+    version: "1.0"
+    name: Operating margin
+    description: Operating profit as a share of revenue
+    synonyms: ["operating margin", "ebit margin", "operating profit margin", "opm"]
+    inputs:
+      op:  { metric: operating_profit }            # metrics may use other metrics
+      rev: { concept: revenue }
+    formula: "op / rev"
+    unit: RATIO                                     # RATIO | INR | DAYS | TIMES | INR_PER_SHARE
+    display: percent                                # percent | crore | days | times | number
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]                              # omit = all
+    assumptions: ["Operating profit as defined by metric operating_profit"]
+    limitations: ["Not comparable across a corporate event"]
+```
+Input options:
+- `concept:` or `metric:` (exactly one)
+- `offset: {years: -1}` or `{periods: -1}` — same/previous period via `core/fiscal.shift_period`
+- `at: period_end | period_start` — for instants used with duration metrics (e.g. opening equity)
+- `missing: fail | zero` — default `fail`; `zero` only for items that are legitimately often absent (e.g. `exceptional_items`, `non_controlling_interest`)
+
+Formula language: numbers, input aliases, `+ - * /`, parentheses, functions `avg(a, b)`, `abs(x)`, `min(a,b)`, `max(a,b)`. Nothing else.
+
+### Starter metrics (v1)
+| id | formula (aliases → inputs) | periods | notes |
+|---|---|---|---|
+| `operating_profit` | `pbt + fin - oi - exc` | Q,H,9M,FY | exc `missing: zero`; assumption: exceptional items sign as normalized in taxonomy |
+| `ebitda` | `op + da` | Q,H,9M,FY | |
+| `operating_margin` | `op / rev` | Q,H,9M,FY | |
+| `ebitda_margin` | `ebitda / rev` | Q,H,9M,FY | |
+| `net_margin` | `pat / rev` | Q,H,9M,FY | |
+| `revenue_growth_yoy` | `rev / rev_ly - 1` | Q,H,9M,FY | `rev_ly` = revenue `offset: {years: -1}` |
+| `pat_growth_yoy` | `pat / abs(pat_ly) - 1` | Q,H,9M,FY | limitation: unstable when last year near zero |
+| `operating_margin_change_yoy` | `om - om_ly` | Q,H,9M,FY | unit RATIO, display as percentage points |
+| `equity_owners` (helper) | `te - nci` | INSTANT | nci `missing: zero` |
+| `capital_employed` (helper) | `te + ltb + stb + ll` | INSTANT | ll (lease liabilities) `missing: zero` |
+| `roe` | `pat_owners / avg(eq, eq_ly)` | FY | eq = `equity_owners` `at: period_end`; eq_ly = same with `offset: {years: -1}` |
+| `roce` | `op / avg(ce, ce_ly)` | FY | ce = helper metric `capital_employed` = equity + borrowings + lease liabilities |
+| `debt_to_equity` | `(ltb + stb) / eq` | INSTANT | eq = `equity_owners` |
+| `current_ratio` | `ca / cl` | INSTANT | |
+| `cfo_to_pat` | `cfo / pat` | H, FY | cash flow is generally not quarterly |
+| `fcf` | `cfo - capex` | H, FY | taxonomy normalizes `capex_ppe` to a positive outflow |
+| `dso` | `rec / rev * days` | FY | `days` = 365 constant defined in the formula input as `{ constant: 365 }`; uses closing receivables (limitation) |
+
+Add `constant:` as an input option for fixed numbers so formulas contain no magic literals beyond those declared.
+
+## Files
+
+### `metrics/registry.py`
+- **Process:** load + validate `metrics.yaml`; check every input refers to a taxonomy concept or registry metric; detect dependency cycles; topologically sort metrics.
+- **Output:** `MetricRegistry` with `get(id)`, `order()`, `synonyms()` (used by M09), `describe(id)`.
+
+### `metrics/evaluator.py`
+- **Process:** parse formula with Python `ast`; allow only `BinOp(Add, Sub, Mult, Div)`, `UnaryOp(USub)`, `Name` (declared aliases), `Constant` (numbers), `Call` to the whitelisted functions; evaluate with `Decimal`. Division by zero → `EvalError('division_by_zero')`.
+- **Output:** `evaluate(formula, values: dict[str, Decimal]) -> Decimal`.
+- **Rule:** never use `eval`/`exec`.
+
+### `metrics/engine.py`
+- **Input:** isin, periods, basis (default: all periods with facts, or an `AffectedSet` from M05).
+- **Process:** for each metric in dependency order and each applicable period:
+  1. sector and period-type applicability → else `not_computed: not_applicable`;
+  2. resolve inputs via `facts.current_view` (+ offsets) or earlier metric results;
+  3. any input blocked (`validation.engine.is_blocked`) → `not_computed: blocked_by_validation (<rule ids>)`;
+  4. missing input (and `missing: fail`) → `not_computed: missing_input (<names>)`;
+  5. a `corporate_events` merger/demerger between the input periods → `not_computed: corporate_event_break`;
+  6. evaluate → `computed`.
+  Write `metric_values` with `formula_version`, `input_fact_ids_json`, `run_id`.
+- **Output:** `MetricRunReport` (computed / not_computed by reason).
+
+### `metrics/query.py`
+- **Process:** read latest `metric_values` for (isin, metric, period, basis), respecting `settings.metrics.version_policy`.
+- **Output:** `get_metric(...)`, `get_metric_series(...)` — used by M09 and M11.
+
+### `metrics/cli.py`
+- `finrag metrics run --isin X`, `finrag metrics show --isin X --metric operating_margin`, `finrag metrics list`
+
+## Tests and acceptance criteria
+1. Each starter metric matches a hand-computed value on a fixture company (one test per metric).
+2. Evaluator rejects `__import__('os')`, attribute access, unknown names, and `**`.
+3. Cycle in registry → load error naming the cycle.
+4. Input referring to an unknown concept → load error.
+5. Blocked input → `not_computed` with the rule ID in the reason.
+6. Missing last-year revenue → `revenue_growth_yoy` `not_computed: missing_input (rev_ly)`.
+7. Changing a formula version → new rows with the new version; old rows unchanged.
+8. Adding a new metric to YAML (in a temp config) computes with no code change.
+9. Decimal precision: results identical across runs.
+
+## Out of scope
+Shenanigan signals (they will be additional registry entries + a separate signal module later).

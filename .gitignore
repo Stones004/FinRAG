@@ -1,0 +1,5 @@
+data/
+tests/golden/
+__pycache__/
+.venv/
+*.db

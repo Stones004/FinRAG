@@ -1,0 +1,7 @@
+# FinRAG watch list — identifiers only. Run `finrag watchlist sync` after editing.
+companies:
+  - id: GABRIEL          # Gabriel India Ltd, INE524A01029
+  - id: HDFCBANK         # HDFC Bank Ltd, INE040A01034
+    sector_type: bank
+  - id: NETWEB           # Netweb Technologies India Ltd, INE0NT901020
+    basis: standalone    # files standalone results only

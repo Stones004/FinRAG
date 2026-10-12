@@ -7,6 +7,8 @@ from finrag.core.types import (
     Period,
     PeriodType,
     decimal_to_text,
+    is_valid_isin,
+    looks_like_isin,
     text_to_decimal,
     to_decimal,
 )
@@ -43,3 +45,24 @@ def test_period_validation() -> None:
         Period(date(2026, 1, 2), date(2026, 1, 1), PeriodType.Q)
     with pytest.raises(ValueError):
         Period(date(2026, 1, 1), date(2026, 1, 2), PeriodType.INSTANT)
+
+
+@pytest.mark.parametrize(
+    "isin", ["INE0NT901020", "INE524A01029", "INE040A01034", "INE040A01018", " ine040a01034 "]
+)
+def test_is_valid_isin_accepts_real_isins(isin: str) -> None:
+    assert is_valid_isin(isin)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["INEONT901020", "INE524A01028", "INE524A0102", "524A01029XYZ", "GABRIEL", "", "INE524A0102A"],
+)
+def test_is_valid_isin_rejects_bad_isins(text: str) -> None:
+    assert not is_valid_isin(text)
+
+
+def test_looks_like_isin_ignores_the_check_digit() -> None:
+    assert looks_like_isin("INEONT901020")  # shape is right, checksum is wrong
+    assert not looks_like_isin("GABRIEL")
+    assert not looks_like_isin("500999")

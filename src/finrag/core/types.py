@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -53,6 +54,15 @@ class SectorType(StrEnum):
     INSURANCE = "insurance"
 
 
+class AliasType(StrEnum):
+    SYMBOL = "symbol"
+    CODE = "code"
+    NAME = "name"
+    USER = "user"
+    ISIN = "isin"
+    SCRIP_CODE = "scrip_code"
+
+
 class JobStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -102,3 +112,28 @@ def text_to_decimal(text: str) -> Decimal:
 def utc_now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string for created_at columns."""
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+ISIN_PATTERN = re.compile(r"[A-Z]{2}[A-Z0-9]{9}[0-9]")
+
+
+def looks_like_isin(text: str) -> bool:
+    """str -> True if it has the ISIN shape (2 letters, 9 alphanumerics, 1 digit)."""
+    return ISIN_PATTERN.fullmatch(text.strip().upper()) is not None
+
+
+def is_valid_isin(text: str) -> bool:
+    """str -> True if it has the ISIN shape and a correct Luhn check digit."""
+    candidate = text.strip().upper()
+    if not looks_like_isin(candidate):
+        return False
+    digits = "".join(str(int(char, 36)) for char in candidate)
+    total = 0
+    for position, char in enumerate(reversed(digits)):
+        value = int(char)
+        if position % 2:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0

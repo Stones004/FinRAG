@@ -60,7 +60,7 @@ _table(
     _id_pk(),
     _text("isin", nullable=False),
     _text("alias", nullable=False),
-    _text("alias_type"),  # symbol|code|name|user
+    _text("alias_type"),  # symbol|code|name|user|isin|scrip_code
     _text("valid_from"),
     _text("valid_to"),
     sa.ForeignKeyConstraint(["isin"], ["entities.isin"]),

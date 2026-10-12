@@ -175,7 +175,7 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 ### 7.1 Reference
 **entities** — `isin TEXT PK, name TEXT, nse_symbol TEXT, bse_code TEXT, sector_type TEXT, default_basis TEXT, status TEXT, added_on TEXT, updated_on TEXT`
 
-**entity_aliases** — `id INTEGER PK, isin TEXT FK, alias TEXT, alias_type TEXT (symbol|code|name|user), valid_from TEXT, valid_to TEXT`
+**entity_aliases** — `id INTEGER PK, isin TEXT FK, alias TEXT, alias_type TEXT (symbol|code|name|user|isin|scrip_code), valid_from TEXT, valid_to TEXT`
 
 **corporate_events** — `id INTEGER PK, isin TEXT FK, event_type TEXT (rename|merger|demerger|delisting|basis_change), event_date TEXT, details TEXT, source TEXT`
 

@@ -5,7 +5,7 @@ Update this file at the end of every module. Newest entry at the bottom.
 | Module | Status | Date | Notes / deviations from spec |
 |---|---|---|---|
 | M00 Foundation | done, awaiting review | 2026-10-11 | Built all `core/` files, `cli.py`, `pyproject.toml`; 66 tests pass, `ruff check` clean. Deviations and assumptions in "M00 notes" below. |
-| M01 Watch list | not started | | |
+| M01 Watch list | done, awaiting review | 2026-10-11 | `watchlist/` (schema, master, resolver, registry, cli); 55 M01 tests, 140 total pass, `ruff check` clean. Notes in "M01 notes" below. |
 | M02 Ingestion | not started | | |
 | M03 Parsing | not started | | |
 | M04 Normalization | not started | | |
@@ -31,6 +31,17 @@ Assumptions and small additions beyond the spec text, all approved in review unl
 - **Logging** configures the `finrag` logger (propagate off), not Python's root logger, so other libraries' logs don't land in `finrag.log`.
 - **Tests** use an autouse fixture that copies `settings.yaml` into a temp repo root, so tests never touch the real `data/`. `INSTANT` periods have no fiscal label and `shift_period` rejects them.
 - Ran `finrag init` once on the real repo: created `data/raw`, `processed`, `indexes`, `logs` and `data/finrag.db`; `data/inbox` and `data/reference` were left as they were.
+
+## M01 notes (2026-10-11)
+- **Shared ISIN validator:** `is_valid_isin` / `looks_like_isin` / `ISIN_PATTERN` in `core/types.py` (Luhn check digit), tested with INE0NT901020 (valid) and INEONT901020 (invalid). M02 reuses it. In M01 an identifier shaped like an ISIN but failing the check digit is `not_found` with a review item saying so; it never falls through to symbol or name matching.
+- **Alias types:** `AliasType` enum (`symbol|code|name|user|isin|scrip_code`) added to `core/types.py`; MASTER_BUILD §7.1 and the `db.py` comment updated. M01 writes `symbol`, `code` (BSE code), `name` and `user` only. `isin` aliases (old ISINs) are for M02; `scrip_code` is allowed but unused, since the master's BSE code is stored as `code`.
+- **Securities master:** NSE columns mapped from the real `nse_equity_list.csv` (headers and values whitespace-stripped). **TODO:** `BSE_COLUMNS` in `watchlist/master.py` are unverified placeholders, tested only with a synthetic file; fix them when a real BSE file exists. A missing BSE file is a logged warning (so it also prints on the console), a missing NSE file is an error. The name-noise words (`LTD`, `LIMITED`) are a constant in `master.py`, as the spec places them there.
+- **Resolver:** order ISIN, NSE symbol, BSE code, exact normalised name, fuzzy (`token_sort_ratio`, `watchlist.name_match_min_score`). Several candidates, exact or fuzzy, give `ambiguous`, never a pick.
+- **Sync rules:** entity `name`/`nse_symbol`/`bse_code` come from the master; `sector_type` only from the watch list file (default from settings, never inferred); `default_basis` from the file or `defaults.basis`. A company missing from the file, or marked `status: paused`, becomes `paused`; adding it back or `status: active` reactivates it. Both appear in `SyncReport.paused` / `.reactivated` (and in `updated`). Entries that fail to resolve go to `review_queue` as `entity_ambiguous`; repeats increment `occurrences` on the open item. An unresolved entry whose text is already an alias of a tracked entity does not cause that entity to be paused. A second file entry resolving to an already listed ISIN is reported as `duplicate` (and queued).
+- **Rename detection depends on refreshing the master file.** A rename is only seen when `nse_equity_list.csv` is re-downloaded after the change. The old symbol/name alias gets `valid_to` = sync day and the new one `valid_from` = sync day (the real change date is not known); a `corporate_events` rename row is written with `source = securities_master`.
+- **"Today":** `settings.app.timezone` is used when the tz database is available. The `tzdata` package is not installed on this Windows machine, so the code falls back to the local date. Not added as a dependency; ask if you want it.
+- **Not done (not in spec):** an open `entity_ambiguous` item is not auto-resolved when the entry later resolves; no `basis_change` event is recorded when the file's `basis` changes.
+- Ran `finrag watchlist sync` on the real repo: added Gabriel (INE524A01029), HDFC Bank (INE040A01034), Netweb (INE0NT901020); the second run reported 0 added, 0 updated.
 
 ## Findings from real data
 Record anything learned from real filings that affects the design (formats, missing

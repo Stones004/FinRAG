@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -31,6 +32,7 @@ class NeedsReview:
     identifier: str
     status: str  # ambiguous | not_found | duplicate
     reason: str
+    suggestions: tuple[SecurityRecord, ...] = ()
 
 
 @dataclass
@@ -133,14 +135,27 @@ def _record_rename(conn: Connection, existing: sa.Row, record: SecurityRecord, t
         )
 
 
-def _queue_review(conn: Connection, identifier: str, status: str, reason: str, found: list) -> None:
+def _brief(records: Iterable[SecurityRecord]) -> list[dict[str, str | None]]:
+    """Records -> the isin/name/symbol dicts stored in review payloads."""
+    return [{"isin": r.isin, "name": r.name, "symbol": r.nse_symbol} for r in records]
+
+
+def _queue_review(
+    conn: Connection,
+    identifier: str,
+    status: str,
+    reason: str,
+    found: Iterable[SecurityRecord],
+    suggestions: Iterable[SecurityRecord] = (),
+) -> None:
     """Create an open entity_ambiguous item, or bump `occurrences` on the existing open one."""
     payload = json.dumps(
         {
             "identifier": identifier,
             "status": status,
             "reason": reason,
-            "candidates": [{"isin": r.isin, "name": r.name, "symbol": r.nse_symbol} for r in found],
+            "candidates": _brief(found),
+            "suggestions": _brief(suggestions),
         }
     )
     queue = tables.review_queue
@@ -300,10 +315,13 @@ def sync_watchlist(
                     company.id,
                     resolution.status,
                     resolution.reason,
-                    list(resolution.candidates),
+                    resolution.candidates,
+                    resolution.suggestions,
                 )
                 report.needs_review.append(
-                    NeedsReview(company.id, resolution.status, resolution.reason)
+                    NeedsReview(
+                        company.id, resolution.status, resolution.reason, resolution.suggestions
+                    )
                 )
                 known = _listed_by_alias(conn, company.id)
                 if known:  # unresolved today, but already tracked: do not pause it

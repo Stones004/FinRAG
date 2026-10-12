@@ -33,6 +33,7 @@ class FilingStatus(StrEnum):
     PARSED = "parsed"
     NORMALIZED = "normalized"
     FAILED = "failed"
+    QUARANTINED = "quarantined"  # content conflicts with its metadata; kept, never parsed
 
 
 class ValidationStatus(StrEnum):

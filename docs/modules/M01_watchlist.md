@@ -32,8 +32,9 @@ companies:
 ### `watchlist/resolver.py`
 - **Input:** one identifier string, `SecuritiesMaster`.
 - **Process:** in order — ISIN regex exact; NSE symbol exact; BSE code exact; normalised name exact; fuzzy name (`rapidfuzz`, ≥ `settings.watchlist.name_match_min_score`).
-- **Output:** `Resolution(status = resolved | ambiguous | not_found, isin, candidates, method)`.
+- **Output:** `Resolution(status = resolved | ambiguous | not_found, isin, candidates, method, reason, suggestions)`.
 - **Rule:** never pick between two candidates automatically.
+- **Suggestions:** when a name matches nothing (no exact, no fuzzy), `suggestions` holds up to `watchlist.suggest_max` records: NSE symbols that start with the input first, then names scoring ≥ `watchlist.suggest_min_score` on `rapidfuzz` `token_set_ratio`. They are only shown (CLI "did you mean", `suggestions` in the review payload), never used to resolve. Not produced for ISIN-shaped input.
 
 ### `watchlist/registry.py`
 - **Input:** resolutions + YAML overrides.

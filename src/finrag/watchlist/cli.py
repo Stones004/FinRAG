@@ -16,6 +16,14 @@ def _fail(exc: Exception) -> typer.Exit:
     return typer.Exit(code=2)
 
 
+def _echo_suggestions(suggestions: tuple) -> None:
+    """Print 'did you mean' lines for suggested records (nothing when there are none)."""
+    if suggestions:
+        typer.echo("  did you mean:")
+    for record in suggestions:
+        typer.echo(f"    {record.isin}  {record.nse_symbol or '-':<12} {record.name}")
+
+
 @watchlist_app.command("sync")
 def sync() -> None:
     """Resolve the watch list file and update the entity registry."""
@@ -40,6 +48,7 @@ def sync() -> None:
             typer.echo(f"  {label}: {isin}")
     for item in report.needs_review:
         typer.echo(f"  needs review: '{item.identifier}' ({item.status}): {item.reason}")
+        _echo_suggestions(item.suggestions)
 
 
 @watchlist_app.command("list")
@@ -75,5 +84,6 @@ def resolve_text(text: str) -> None:
         typer.echo(f"  {record.isin}  {record.nse_symbol or '-':<12} {record.name}")
     if resolution.reason:
         typer.echo(f"  {resolution.reason}")
+    _echo_suggestions(resolution.suggestions)
     if resolution.status != "resolved":
         raise typer.Exit(code=1)

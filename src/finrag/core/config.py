@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -63,6 +64,7 @@ class PathsSettings(_Model):
     indexes: Path
     reference: Path
     inbox: Path
+    inbox_processed: Path
     logs: Path
     watchlist: Path
     taxonomy: Path
@@ -136,6 +138,8 @@ class WatchlistSettings(_Model):
     default_sector_type: str
     allowed_sector_types: list[str]
     name_match_min_score: int = Field(ge=0, le=100)
+    suggest_max: int = Field(ge=0)
+    suggest_min_score: int = Field(ge=0, le=100)
 
     @model_validator(mode="after")
     def _default_allowed(self) -> WatchlistSettings:
@@ -159,12 +163,33 @@ class SourceEndpointSettings(_Model):
     user_agent: str
 
 
+class NseEndpoints(_Model):
+    integrated_filing_results: str
+    legacy_financial_results: str
+    annual_reports: str
+    corporate_announcements: str
+
+
+class NseSettings(SourceEndpointSettings):
+    endpoints: NseEndpoints
+    integrated_filing_type: str
+    integrated_from_period_end: date
+    legacy_result_periods: list[str]
+    transcript_desc: str
+    transcript_text_marker: str
+    announcement_window_days: int = Field(gt=0)
+
+
 class SourcesSettings(_Model):
     enabled: list[str]
     securities_master: SecuritiesMasterSettings
-    nse: SourceEndpointSettings
+    nse: NseSettings
     bse: SourceEndpointSettings
     filing_types: list[str]
+
+
+class IngestionSettings(_Model):
+    transcript_link_only_max_pages: int = Field(ge=0)
 
 
 class ChandraSettings(_Model):
@@ -327,6 +352,7 @@ class Settings(_Model):
     units: UnitsSettings
     watchlist: WatchlistSettings
     sources: SourcesSettings
+    ingestion: IngestionSettings
     parsing: ParsingSettings
     normalize: NormalizeSettings
     restatement: ToleranceSettings

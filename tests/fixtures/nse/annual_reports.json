@@ -1,0 +1,32 @@
+{
+  "status": 200,
+  "request": "/api/annual-reports?index=equities&symbol=NETWEB",
+  "response": {
+    "data": [
+      {
+        "companyName": "Netweb Technologies India Limited",
+        "fromYr": "2025",
+        "toYr": "2026",
+        "submission_type": "New",
+        "broadcast_dttm": "28-AUG-2026 13:00:44",
+        "disseminationDateTime": "28-AUG-2026 13:00:46",
+        "timeTaken": "00:00:02",
+        "fileName": "https://nsearchives.nseindia.com/annual_reports/AR_30772_NETWEB_2025_2026_A_8668640_28082026130044.pdf",
+        "attFileSize": "8.27 MB"
+      },
+      {
+        "companyName": "Netweb Technologies India Limited",
+        "fromYr": "2024",
+        "toYr": "2025",
+        "submission_type": "New",
+        "broadcast_dttm": "05-AUG-2025 16:17:17",
+        "disseminationDateTime": "05-AUG-2025 16:17:19",
+        "timeTaken": "00:00:02",
+        "fileName": "https://nsearchives.nseindia.com/annual_reports/AR_27282_NETWEB_2024_2025_A_05082025161717.pdf",
+        "attFileSize": null
+      }
+    ]
+  },
+  "recorded_on": "2026-10-12",
+  "note": "Real NSE response, trimmed to a few records for tests. Field names are authoritative."
+}

@@ -23,7 +23,7 @@ Write canonical facts append-only, detect restatements, derive discrete periods 
 
 ### `facts/current_view.py`
 - **Input:** isin, concept(s), period(s), basis.
-- **Process:** latest fact by `filed_on`, tie-break by `created_at`; option `as_of=<date>` returns what was known on that date.
+- **Process:** latest fact by `filed_on`, then `revision_no` of its filing, then `created_at` (an original and its revision share the board-meeting date that XBRL gives as `filed_on`, so `revision_no` decides); filings with status `quarantined` are never a source; option `as_of=<date>` returns what was known on that date.
 - **Output:** `get_fact(...) -> Fact | None`, `get_facts(...) -> list[Fact]`, `get_series(isin, concept, period_type, basis, n)`.
 - **Rule:** every later module reads facts only through this file.
 

@@ -17,6 +17,7 @@ paths:
   indexes: ./data/indexes
   reference: ./data/reference          # securities master files
   inbox: ./data/inbox                  # manual drop folder for filings
+  inbox_processed: ./data/inbox/_processed   # inbox files already stored in the raw store
   logs: ./data/logs
   # registries (data files, owned by modules)
   watchlist: ./config/watchlist.yaml
@@ -54,6 +55,8 @@ watchlist:
   default_sector_type: general         # general | bank | nbfc | insurance
   allowed_sector_types: [general, bank, nbfc, insurance]
   name_match_min_score: 90             # rapidfuzz score to accept a name match
+  suggest_max: 5                       # max suggestions shown when no exact or fuzzy match is found
+  suggest_min_score: 60                # token_set_ratio floor for a name to be suggested
 
 sources:
   enabled: [local_inbox]               # add nse / bse only after access terms are confirmed
@@ -67,6 +70,18 @@ sources:
     retries: 3
     backoff_s: 5
     user_agent: ""                     # [VERIFY]
+    # Endpoint paths recorded 2026-10-12 (tests/fixtures/nse/); joined to base_url.
+    endpoints:
+      integrated_filing_results: /api/integrated-filing-results
+      legacy_financial_results: /api/corporates-financial-results
+      annual_reports: /api/annual-reports
+      corporate_announcements: /api/corporate-announcements
+    integrated_filing_type: "Integrated Filing- Financials"
+    integrated_from_period_end: 2025-03-31   # results for periods ending on/after this are under integrated filings
+    legacy_result_periods: [Quarterly]       # values of the old API's `period` parameter to query
+    transcript_desc: "Analysts/Institutional Investor Meet/Con. Call Updates"
+    transcript_text_marker: transcript       # case-insensitive, in attchmntText
+    announcement_window_days: 90             # [VERIFY] longest from/to range requested per announcements call
   bse:
     base_url: ""                       # [VERIFY]
     requests_per_minute: 20
@@ -75,6 +90,9 @@ sources:
     backoff_s: 5
     user_agent: ""                     # [VERIFY]
   filing_types: [financial_results, annual_report, earnings_call_transcript]
+
+ingestion:
+  transcript_link_only_max_pages: 2    # a transcript file this short with no Q&A text is a cover letter only
 
 parsing:
   ocr:

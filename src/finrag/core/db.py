@@ -95,7 +95,7 @@ _table(
     _text("raw_path"),
     _text("sha256", nullable=False, unique=True),
     _text("format"),  # xbrl|pdf
-    _text("status"),  # fetched|parsed|normalized|failed
+    _text("status"),  # fetched|parsed|normalized|failed|quarantined
     _text("error"),
     _text("created_at"),
     sa.ForeignKeyConstraint(["isin"], ["entities.isin"]),
@@ -149,6 +149,7 @@ _table(
     "review_queue",
     _id_pk(),
     # unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only
+    # |filing_conflict|inbox_unrecognised
     _text("item_type"),
     _text("payload_json"),
     _int("occurrences"),

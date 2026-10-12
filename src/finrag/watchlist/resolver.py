@@ -16,13 +16,17 @@ ResolutionStatus = Literal["resolved", "ambiguous", "not_found"]
 
 @dataclass(frozen=True)
 class Resolution:
-    """Outcome of resolving one identifier; `reason` explains ambiguous and not_found."""
+    """Outcome of resolving one identifier; `reason` explains ambiguous and not_found.
+
+    `suggestions` are shown for a not_found name; they are never picked automatically.
+    """
 
     status: ResolutionStatus
     isin: str | None = None
     candidates: tuple[SecurityRecord, ...] = field(default_factory=tuple)
     method: str | None = None
     reason: str = ""
+    suggestions: tuple[SecurityRecord, ...] = field(default_factory=tuple)
 
 
 def _resolved(record: SecurityRecord, method: str) -> Resolution:
@@ -66,6 +70,31 @@ def resolve(
     return _fuzzy(text, master, settings or get_settings())
 
 
+def suggest(text: str, master: SecuritiesMaster, settings: Settings) -> tuple[SecurityRecord, ...]:
+    """Text -> up to suggest_max records: symbols starting with it, then token_set_ratio names."""
+    limit = settings.watchlist.suggest_max
+    query = normalize_name(text)
+    if not query or limit == 0:
+        return ()
+    prefix = text.strip().upper()
+    found = {
+        r.isin: r
+        for r in sorted(master.records(), key=lambda r: r.nse_symbol or "")
+        if r.nse_symbol and r.nse_symbol.upper().startswith(prefix)
+    }
+    hits = process.extract(
+        query,
+        master.norm_names(),
+        scorer=fuzz.token_set_ratio,
+        score_cutoff=settings.watchlist.suggest_min_score,
+        limit=None,
+    )
+    for name, _score, _idx in sorted(hits, key=lambda h: (-h[1], h[0])):
+        for record in master.by_norm_name(name):
+            found.setdefault(record.isin, record)
+    return tuple(list(found.values())[:limit])
+
+
 def _fuzzy(text: str, master: SecuritiesMaster, settings: Settings) -> Resolution:
     """Fuzzy name match at or above settings.watchlist.name_match_min_score."""
     query = normalize_name(text)
@@ -80,5 +109,9 @@ def _fuzzy(text: str, master: SecuritiesMaster, settings: Settings) -> Resolutio
     )
     records = [r for name, _score, _idx in hits for r in master.by_norm_name(name)]
     if not records:
-        return Resolution("not_found", reason=f"no match for '{text}' in the securities master")
+        return Resolution(
+            "not_found",
+            reason=f"no match for '{text}' in the securities master",
+            suggestions=suggest(text, master, settings),
+        )
     return _from_candidates(records, "name_fuzzy", f"name '{text}'")

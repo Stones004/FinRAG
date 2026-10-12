@@ -1,0 +1,6 @@
+# Heading and marker patterns for PDFs.
+# M02 created this file with only transcript_markers.qa_start (needed by the transcript
+# link-only check). M03 adds the statement patterns and M08 adds the narrative sections and the
+# remaining transcript_markers keys; extend this file, do not replace it.
+transcript_markers:
+  qa_start: '(?i)question\s+is\s+from\s+the\s+line\s+of'     # first match (in any speaker's turn) starts Q&A, at the start of that turn

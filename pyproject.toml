@@ -18,7 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-mock", "ruff"]
 watchlist = ["rapidfuzz"]
-ingestion = ["httpx", "lxml"]
+ingestion = ["httpx", "lxml", "pymupdf"]
 parsing = ["lxml", "pandas", "pdfplumber", "pymupdf", "pytesseract"]
 narrative = ["numpy", "rank_bm25", "rapidfuzz", "sentence-transformers"]
 faiss = ["faiss-cpu"]

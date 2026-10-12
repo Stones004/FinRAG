@@ -114,3 +114,7 @@ XBRL facts outrank PDF/OCR facts. When an XBRL fact and a `pdf_table`/`ocr` fact
 
 ## Out of scope
 Storing facts, restatement logic, derivation (M05).
+
+## `known_unmapped_labels` (M04 follow-up, 2026-10-13)
+`taxonomy.yaml` also holds `known_unmapped_labels: {statement: {normalised label: reason | {reason, note}}}` for PDF/OCR labels that are understood and deliberately not mapped (working-capital lines, cash-flow sub-items, OCI lines, subtotals, OCR-merged headers). The mapper looks a label up under the statement of its page after the concept labels and manual resolutions, so such labels never reach the review queue. The registry fails to load if a label is not in normalised form, names an unknown statement or reason, or is also a concept label of the same statement. New reasons: `subtotal`, `ocr_merged_label`. `in-capmkt:AmountOfRelatedPartyTransactionDuringTheReportingPeriod` is `related_party` in the banking family as well.
+**Queue-clearing rule:** a PDF label is mapped only when it is unambiguous within its statement AND its value equals the XBRL value of the same period; fuzzy suggestions are never auto-accepted (see PROGRESS).

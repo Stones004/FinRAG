@@ -33,6 +33,8 @@ unmapped_reasons:
   bank_disclosure: Bank-only regulatory disclosure (asset quality).
   ratio: Reported ratio or percentage; metrics are computed by M07.
   metadata: Filing metadata that is not a financial value.
+  subtotal: Subtotal or total line outside the starter concept list, or a different subtotal from the concept it resembles.
+  ocr_merged_label: Section header merged into a line by the OCR layout (label unreliable); the value is only a PDF/OCR duplicate of an XBRL fact.
 
 concepts:
   # ---------------------------------------------------------------- profit and loss
@@ -721,6 +723,7 @@ known_unmapped:
     "in-capmkt:FaceValueOfEquityShareCapital": "share_data"
     "in-capmkt:PaidUpValueOfEquityShareCapital": "share_data"
   banking:
+    "in-capmkt:AmountOfRelatedPartyTransactionDuringTheReportingPeriod": { reason: related_party, note: "entity-total fact seen in HDFC Bank filings (no dimension); a transaction amount, never a financial statement value" }
     "in-capmkt:BalancesWithBanksAndMoneyAtCallAndShortNotice": "balance_sheet_item"
     "in-capmkt:CashAndBalancesWithReserveBankOfIndia": "balance_sheet_item"
     "in-capmkt:FixedAssets": "balance_sheet_item"
@@ -822,3 +825,80 @@ known_unmapped:
     "in-capmkt:UnAllocableLiabilities": "segment"
     "in-capmkt:FaceValueOfEquityShareCapital": "share_data"
     "in-capmkt:PaidUpValueOfEquityShareCapital": "share_data"
+
+# PDF/OCR labels that are understood and deliberately not mapped, scoped by the statement of the
+# page they were read on, so they never queue for review. Labels are in normalised form. Every
+# label was seen in the Netweb Q4 FY26 results scan. Checked against the XBRL revision, a label
+# is mapped only when it is unambiguous within its statement AND its value equals the XBRL value;
+# 'NOT x' notes record the plausible-looking mappings that are wrong (fuzzy suggestions are never
+# accepted automatically).
+known_unmapped_labels:
+  profit_and_loss:
+    "profit before exceptional items and tax": { reason: subtotal, note: "equals profit_before_tax plus exceptional items" }
+    "current tax": { reason: income_statement_item, note: "component of tax_expense" }
+    "adjustment of tax relating to earlier period": { reason: income_statement_item, note: "component of tax_expense" }
+    "deferred tax": { reason: income_statement_item, note: "component of tax_expense" }
+    "re measurement gains on defined benefit plans": { reason: income_statement_item, note: "OCI line; the total is other_comprehensive_income" }
+    "income tax relating to items that will not be reclassified to statement of profit and loss": { reason: income_statement_item, note: "OCI line" }
+    "total comprehensive income for the period year": { reason: subtotal, note: "profit plus OCI; no concept in the starter list" }
+    "paid up equity share capital": { reason: share_data, note: "footer of the P&L page, dated as a duration; the XBRL tag PaidUpValueOfEquityShareCapital is also share_data; the balance-sheet line is equity_share_capital" }
+    "other equity": { reason: balance_sheet_item, note: "footer of the P&L page, dated as a duration; the balance-sheet line is other_equity" }
+    "basic": { reason: income_statement_item, note: "earnings per share: a per-share value, the page unit (millions) must not scale it; XBRL carries eps_basic" }
+    "diluted": { reason: income_statement_item, note: "earnings per share: a per-share value, the page unit (millions) must not scale it; XBRL carries eps_diluted" }
+  balance_sheet:
+    "right of use assets": balance_sheet_item
+    "intangible assets under development financial assets investments": { reason: ocr_merged_label, note: "section header merged into the line; value equals XBRL IntangibleAssetsUnderDevelopment" }
+    "other financial assets": { reason: balance_sheet_item, note: "appears under both non-current and current assets, so the label alone is ambiguous" }
+    "deferred tax assets": balance_sheet_item
+    "other non current assets": balance_sheet_item
+    "total non current assets": { reason: subtotal, note: "NOT total_current_assets: the opposite line item" }
+    "inventories financial assets": { reason: ocr_merged_label, note: "section header merged into the line" }
+    "other current assets": { reason: balance_sheet_item, note: "NOT total_current_assets: a component" }
+    "borrowings": { reason: balance_sheet_item, note: "appears under both non-current and current liabilities, so the label alone is ambiguous (long_term_borrowings / short_term_borrowings are mapped from XBRL)" }
+    "lease liabilities": { reason: balance_sheet_item, note: "appears under both non-current and current liabilities" }
+    "other non current liabilities": balance_sheet_item
+    "provisions": { reason: balance_sheet_item, note: "appears under both non-current and current liabilities" }
+    "total non current liabilities": { reason: subtotal, note: "NOT total_current_liabilities: the opposite line item" }
+    "lease liabilities trade payables": { reason: ocr_merged_label, note: "section header merged into the line" }
+    "total outstanding dues of micro enterprises and small enterprises": { reason: balance_sheet_item, note: "part of trade_payables_current" }
+    "total outstanding dues of creditors other than micro enterprises and small enterprises": { reason: balance_sheet_item, note: "part of trade_payables_current" }
+    "other financial liabilities": { reason: balance_sheet_item, note: "appears under both non-current and current liabilities" }
+    "other current liabilities": { reason: balance_sheet_item, note: "NOT total_current_liabilities: a component" }
+    "current tax liabilities": { reason: balance_sheet_item, note: "NOT total_current_liabilities: a component" }
+  cash_flow:
+    "profit before tax": { reason: cash_flow_adjustment, note: "starting line of the cash-flow reconciliation; the P&L line is profit_before_tax" }
+    "depreciation and amortization expense": { reason: cash_flow_adjustment, note: "cash-flow add-back, excludes right-of-use depreciation (FY25: 90.12 mn against 113.43 mn on the P&L), so it is NOT depreciation_amortisation" }
+    "depreciation of right of use assets": cash_flow_adjustment
+    "finance costs": { reason: cash_flow_adjustment, note: "add-back; the P&L line is finance_cost" }
+    "interest on lease liabilities": cash_flow_adjustment
+    "interest income": { reason: cash_flow_item, note: "interest received, investing section" }
+    "unrealised foreign exchange": cash_flow_adjustment
+    "liabilities written back": cash_flow_adjustment
+    "provision for doubtful debts": cash_flow_adjustment
+    "bad debts written off": cash_flow_adjustment
+    "emd balance written off": cash_flow_adjustment
+    "share based payments to employees": cash_flow_adjustment
+    "loss on discard of property plant and equipment": cash_flow_adjustment
+    "profit on sale of property plant and equipment": cash_flow_adjustment
+    "operating profit before working capital changes": subtotal
+    "decrease in trade receivables": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "decrease in other financial assets": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "decrease in other assets": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "decrease in inventories": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in other liabilities": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in trade payables": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in other financial liabilities": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in provisions": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "cash generated from operating activities": { reason: subtotal, note: "pre-tax cash from operations; NOT cfo (cfo is this less income tax paid)" }
+    "income tax paid": cash_flow_item
+    "purchase of property plant and equipment and intangibles": { reason: cash_flow_item, note: "capex_ppe plus capex_intangibles combined; mapped from XBRL only" }
+    "proceeds from sale of property plant and equipment": cash_flow_item
+    "investment in bank deposits": cash_flow_item
+    "proceeds from bank deposits": cash_flow_item
+    "interest paid": cash_flow_item
+    "repayment of long term borrowings": cash_flow_item
+    "short term borrowings": { reason: cash_flow_item, note: "proceeds from borrowings, financing section" }
+    "principal payments against lease liabilities": cash_flow_item
+    "monitoring account and public account": { reason: cash_flow_item, note: "IPO proceeds held in a monitoring account" }
+    "recovery of ipo and pre ipo expenses": cash_flow_item
+    "issue of fresh capital": { reason: cash_flow_item, note: "proceeds from issuing shares" }

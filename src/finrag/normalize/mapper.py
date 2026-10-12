@@ -134,6 +134,9 @@ class Mapper:
         concept = self.taxonomy.by_label.get(key)
         if concept is not None and statement in (None, self.taxonomy.concepts[concept].statement):
             return self._applies(concept, sector, METHOD_LABEL)
+        known = self.taxonomy.known_labels.get((scope, key))
+        if known is not None:
+            return Known(known.reason, known)
         if (scope, key) in self.resolutions.ignored_labels:
             return Known(REASON_USER_IGNORED)
         suggestion = None if concept else _suggest(key, self.taxonomy, self.fuzzy_min_score)

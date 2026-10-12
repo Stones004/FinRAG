@@ -90,6 +90,8 @@ class TaxonomyFile(_Model):
     unmapped_reasons: dict[str, str]
     concepts: dict[str, Concept]
     known_unmapped: dict[str, dict[str, UnmappedEntry | str]] = {}
+    # PDF/OCR labels that are understood and deliberately not mapped: statement -> label -> reason
+    known_unmapped_labels: dict[str, dict[str, UnmappedEntry | str]] = {}
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,8 @@ class Taxonomy:
     by_qname: dict[tuple[str, str], str] = field(default_factory=dict)
     by_label: dict[str, str] = field(default_factory=dict)
     known: dict[tuple[str, str], KnownUnmapped] = field(default_factory=dict)
+    # (statement, normalised label) -> why it is not mapped (`KnownUnmapped.qname` holds the label)
+    known_labels: dict[tuple[str, str], KnownUnmapped] = field(default_factory=dict)
 
     @property
     def opening_names(self) -> frozenset[str]:
@@ -129,7 +133,7 @@ class Taxonomy:
         return {k.reason for (fam, _), k in self.known.items() if fam == family}
 
 
-def _index(raw: TaxonomyFile) -> tuple[dict, dict, dict, list[str]]:
+def _index(raw: TaxonomyFile) -> tuple[dict, dict, dict, dict, list[str]]:
     """Build the QName, label and known-unmapped indexes; collect every problem found."""
     problems: list[str] = []
     by_qname: dict[tuple[str, str], str] = {}
@@ -176,7 +180,34 @@ def _index(raw: TaxonomyFile) -> tuple[dict, dict, dict, list[str]]:
             elif item.reason not in raw.unmapped_reasons:
                 problems.append(f"{qname}: unknown reason '{item.reason}'")
             known[(family, qname)] = KnownUnmapped(qname, item.reason, duplicate_of, item.note)
-    return by_qname, by_label, known, problems
+    known_labels = _index_labels(raw, by_label, problems)
+    return by_qname, by_label, known, known_labels, problems
+
+
+_STATEMENTS = ("profit_and_loss", "balance_sheet", "cash_flow", "other")
+
+
+def _index_labels(
+    raw: TaxonomyFile, by_label: dict[str, str], problems: list[str]
+) -> dict[tuple[str, str], KnownUnmapped]:
+    """known_unmapped_labels -> lookup by (statement, label); labels must be normalised."""
+    found: dict[tuple[str, str], KnownUnmapped] = {}
+    for statement, entries in raw.known_unmapped_labels.items():
+        if statement not in _STATEMENTS:
+            problems.append(f"known_unmapped_labels: unknown statement '{statement}'")
+        for label, entry in entries.items():
+            item = UnmappedEntry(reason=entry) if isinstance(entry, str) else entry
+            if label != normalise_label(label):
+                problems.append(f"known_unmapped_labels: '{label}' is not in normalised form")
+            mapped = by_label.get(label)
+            if mapped is not None and raw.concepts[mapped].statement == statement:
+                problems.append(
+                    f"known_unmapped_labels: '{label}' ({statement}) is also a label of '{mapped}'"
+                )
+            if item.reason not in raw.unmapped_reasons:
+                problems.append(f"known_unmapped_labels: '{label}': unknown reason '{item.reason}'")
+            found[(statement, label)] = KnownUnmapped(label, item.reason, None, item.note)
+    return found
 
 
 def parse_taxonomy(data: dict[str, Any]) -> Taxonomy:
@@ -186,7 +217,7 @@ def parse_taxonomy(data: dict[str, Any]) -> Taxonomy:
     except ValidationError as exc:
         lines = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
         raise TaxonomyError("invalid taxonomy registry:\n  " + "\n  ".join(lines)) from exc
-    by_qname, by_label, known, problems = _index(raw)
+    by_qname, by_label, known, known_labels, problems = _index(raw)
     if problems:
         raise TaxonomyError("invalid taxonomy registry:\n  " + "\n  ".join(problems))
     return Taxonomy(
@@ -198,6 +229,7 @@ def parse_taxonomy(data: dict[str, Any]) -> Taxonomy:
         by_qname,
         by_label,
         known,
+        known_labels,
     )
 
 

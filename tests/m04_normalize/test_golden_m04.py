@@ -247,10 +247,14 @@ def test_hdfc_npa_zero_is_a_placeholder_and_the_standalone_value_is_stored(outco
         for f, o in outcomes.values()
         if f.isin == HDFC and f.format == "xbrl" and f.basis == "consolidated"
     ]
+    # the Q1 FY27 standalone filing; later-added standalone filings carry other periods' values
     standalone = [
         o
         for f, o in outcomes.values()
-        if f.isin == HDFC and f.format == "xbrl" and f.basis == "standalone"
+        if f.isin == HDFC
+        and f.format == "xbrl"
+        and f.basis == "standalone"
+        and f.period_end == "2026-06-30"
     ]
     assert consolidated and standalone
     bank = (
@@ -283,3 +287,20 @@ def test_hdfc_operating_profit_before_provisions_is_mapped(outcomes) -> None:
     }
     assert got[("Q", date(2026, 3, 31))] == Decimal("311116800000")
     assert got[("FY", date(2026, 3, 31))] == Decimal("1287976700000")
+
+
+def test_netweb_scan_leaves_nothing_unmapped(outcomes) -> None:
+    """Every scan label is mapped, known-unmapped, or the one resolved through the review queue."""
+    scan = next(o for f, o in outcomes.values() if f.filing_id == "FIL-84bf2a7b31af")
+    # (this mapper has no review resolutions: "equity equity share capital" was resolved by hand)
+    assert {u.outcome.key for u in scan.unmapped} == {"equity equity share capital"}
+    assert scan.known_by_reason["subtotal"] > 0
+    # the wrong high-score suggestions were not accepted: the non-current totals (683.66 and
+    # 93.96 mn at 31 Mar 2025) are not total_current_assets / total_current_liabilities
+    wrong = {Decimal("683660000.00"), Decimal("93960000.00")}
+    assert not any(
+        c.concept in ("total_current_assets", "total_current_liabilities") and c.value in wrong
+        for c in scan.candidates
+    )
+    cfo = [c for c in scan.candidates if c.concept == "cfo"]
+    assert all(c.value != Decimal("261710000.00") for c in cfo)  # pre-tax cash from operations

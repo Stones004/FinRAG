@@ -32,11 +32,12 @@ def test_pdf_extension_and_unknown_year(kit) -> None:
     assert path.name == "FIL-abc.pdf" and path.parent.name == "unknown"
 
 
-def test_file_is_read_only(kit) -> None:
+def test_file_is_read_only(kit, elevated) -> None:
     _, path, _ = store_raw(b"data", candidate(kit), kit.ALPHA)
-    assert not path.stat().st_mode & stat.S_IWRITE
-    with pytest.raises(PermissionError):
-        path.write_bytes(b"changed")
+    assert not path.stat().st_mode & stat.S_IWRITE  # the mode bits are checked everywhere
+    if not elevated:  # root/administrator may write anyway, so the write attempt is skipped
+        with pytest.raises(PermissionError):
+            path.write_bytes(b"changed")
 
 
 def test_storing_the_same_bytes_again_leaves_the_file_alone(kit) -> None:

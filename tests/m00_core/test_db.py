@@ -50,3 +50,78 @@ def test_foreign_keys_enforced_and_sha_unique() -> None:
         conn.execute(sa.insert(tables.filings).values(**row))
     with pytest.raises(sa.exc.IntegrityError), transaction() as conn:
         conn.execute(sa.insert(tables.filings).values(**{**row, "filing_id": "FIL-bbbbbbbbbbbb"}))
+
+
+def _make_v1_database() -> None:
+    """Write a schema-version-1 database (parsed_facts without dimensions_json) with one row."""
+    import sqlite3
+
+    from finrag.core.config import get_settings
+
+    path = get_settings().paths.db
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+            INSERT INTO schema_version VALUES (1, '2026-10-11T00:00:00+00:00');
+            CREATE TABLE parsed_facts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, filing_id TEXT NOT NULL, concept_raw TEXT,
+                label_raw TEXT, period_start TEXT, period_end TEXT, basis TEXT, value TEXT,
+                unit_raw TEXT, scale INTEGER, decimals INTEGER, source_loc TEXT, extractor TEXT,
+                ocr_backend TEXT, confidence FLOAT
+            );
+            INSERT INTO parsed_facts (filing_id, concept_raw, value) VALUES ('FIL-x', 'a', '1');
+            """
+        )
+
+
+def test_version_1_database_is_upgraded_in_place() -> None:
+    _make_v1_database()
+    init_db()
+    columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("parsed_facts")}
+    assert {"dimensions_json", "statement_type"} <= columns
+    with transaction() as conn:
+        version = conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
+        assert version == SCHEMA_VERSION == 3
+        row = conn.execute(sa.select(tables.parsed_facts)).one()
+    assert (row.filing_id, row.concept_raw, row.value, row.dimensions_json, row.statement_type) == (
+        "FIL-x",
+        "a",
+        "1",
+        None,
+        None,
+    )
+    init_db()  # a second call changes nothing
+    assert _count(tables.parsed_facts) == 1
+
+
+def test_version_2_database_gets_statement_type() -> None:
+    """A v2 database (dimensions_json, no statement_type) is upgraded; its rows are untouched."""
+    import sqlite3
+
+    from finrag.core.config import get_settings
+
+    _make_v1_database()
+    with sqlite3.connect(get_settings().paths.db) as conn:
+        conn.execute("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT")
+        conn.execute("INSERT INTO schema_version VALUES (2, '2026-10-12T00:00:00+00:00')")
+    init_db()
+    columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("parsed_facts")}
+    assert "statement_type" in columns
+    with transaction() as conn:
+        assert conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar() == 3
+        row = conn.execute(sa.select(tables.parsed_facts)).one()
+    assert (row.concept_raw, row.value, row.statement_type) == ("a", "1", None)
+
+
+def test_database_newer_than_the_code_is_refused() -> None:
+    from finrag.core.db import SchemaVersionError
+
+    init_db()
+    with transaction() as conn:
+        conn.execute(
+            sa.insert(tables.schema_version).values(version=SCHEMA_VERSION + 1, applied_at="x")
+        )
+    with pytest.raises(SchemaVersionError):
+        init_db()

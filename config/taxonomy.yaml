@@ -1,0 +1,822 @@
+# FinRAG taxonomy (M04): canonical concepts, their source mappings, and the QNames that are
+# understood but deliberately not mapped (known_unmapped).
+#
+# Every QName below was seen in a real filing (data/inbox, parsed by M03). Do not add one that has
+# not been seen in a real file. Lookups are keyed by (taxonomy family, QName); the family comes from
+# filings.taxonomy_family. Mapped facts keep their values exactly as reported (no sign flipping);
+# `sign_convention` tells M07 how to read them.
+# PDF labels: only labels seen in the real Netweb Q4 FY26 results scan, each checked by value against
+# the XBRL revision. A label maps only to a concept of the statement of its page. `pdf_sign: negate`
+# converts PDF values to the XBRL convention (the PDF prints outflows as negatives).
+version: 1
+
+families: [indas, banking]
+
+# XBRL unit strings (parsed_facts.unit_raw) accepted for each canonical unit.
+xbrl_units:
+  INR: ["iso4217:INR"]
+  INR_PER_SHARE: ["iso4217:INR/xbrli:shares"]
+  SHARES: ["xbrli:shares"]
+  RATIO: ["xbrli:pure"]
+
+# Reasons a QName can be known but unmapped. `duplicate_of:<concept>` is also allowed.
+# These facts stay in parsed_facts; they are counted by reason and never queued for review.
+unmapped_reasons:
+  cash_flow_adjustment: Reconciling adjustment between profit and operating cash flow (working capital, non-cash items); an input for later signals.
+  cash_flow_item: Other cash-flow statement line (investing and financing detail, taxes paid, interest and dividends received).
+  income_statement_item: Profit and loss line outside the starter concept list.
+  balance_sheet_item: Balance sheet line outside the starter concept list.
+  segment: Segment disclosure reported without a dimension; never an entity total.
+  related_party: Related-party transaction amount; an input for later signals.
+  notes_disclosure: Amount from the notes or other disclosures.
+  share_data: Face value or paid-up value of shares.
+  bank_disclosure: Bank-only regulatory disclosure (asset quality).
+  ratio: Reported ratio or percentage; metrics are computed by M07.
+  metadata: Filing metadata that is not a financial value.
+
+concepts:
+  # ---------------------------------------------------------------- profit and loss
+  revenue:
+    label: Revenue from operations
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [general, nbfc]
+    xbrl_concepts: { indas: ["in-capmkt:RevenueFromOperations"] }
+    labels: ["Revenue from operations"]
+  other_income:
+    label: Other income
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:OtherIncome"], banking: ["in-capmkt:OtherIncome"] }
+    labels: ["Other income"]
+  total_income:
+    label: Total income
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Income"], banking: ["in-capmkt:Income"] }
+    labels: ["Total income"]
+  cost_of_materials:
+    label: Cost of materials consumed
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CostOfMaterialsConsumed"] }
+    labels: ["Cost of materials consumed"]
+  purchases_stock_in_trade:
+    label: Purchases of stock-in-trade
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:PurchasesOfStockInTrade"] }
+  change_in_inventories:
+    label: Changes in inventories of finished goods, work-in-progress and stock-in-trade
+    description: Reported with the sign shown in the filing (a decrease in inventory is positive expense).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:ChangesInInventoriesOfFinishedGoodsWorkInProgressAndStockInTrade"] }
+    labels: ["Change in inventories of finished goods and work in progress"]
+  employee_expense:
+    label: Employee benefits expense
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:EmployeeBenefitExpense"], banking: ["in-capmkt:EmployeesCost"] }
+    labels: ["Employee benefits expense"]
+  finance_cost:
+    label: Finance costs
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:FinanceCosts"] }
+    labels: ["Finance costs"]
+  depreciation_amortisation:
+    label: Depreciation and amortisation expense
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:DepreciationDepletionAndAmortisationExpense"] }
+    labels: ["Depreciation and amortisation expenses"]
+  other_expenses:
+    label: Other expenses
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:OtherExpenses"] }
+    labels: ["Other expenses"]
+  total_expenses:
+    label: Total expenses
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Expenses"] }
+    labels: ["Total expenses"]
+  exceptional_items:
+    label: Exceptional items
+    description: Reported with the sign shown in the filing (negative = a loss) in the real files.
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:ExceptionalItemsBeforeTax"], banking: ["in-capmkt:ExceptionalItems"] }
+  profit_before_tax:
+    label: Profit before tax
+    description: Banking family uses ProfitLossFromOrdinaryActivitiesBeforeTax (HDFC Bank Q4 FY26 - PBT less TaxExpense equals the profit for the period).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:ProfitBeforeTax"]
+      banking: ["in-capmkt:ProfitLossFromOrdinaryActivitiesBeforeTax"]
+    labels: ["Profit before tax"]
+  tax_expense:
+    label: Tax expense
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:TaxExpense"], banking: ["in-capmkt:TaxExpense"] }
+    labels: ["Total tax expense"]
+  profit_after_tax:
+    label: Profit for the period
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:ProfitLossForPeriod"]
+      banking: ["in-capmkt:ProfitLossForThePeriod"]
+    labels: ["Profit for the period / year"]
+  profit_attributable_owners:
+    label: Profit attributable to owners of the parent
+    description: Only consolidated filings with minority interests carry it (Gabriel); the banking family uses the profit after minority interest and associates.
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:ProfitOrLossAttributableToOwnersOfParent"]
+      banking: ["in-capmkt:ProfitLossAfterTaxesMinorityInterestAndShareOfProfitLossOfAssociates"]
+  other_comprehensive_income:
+    label: Other comprehensive income
+    description: Both OtherComprehensiveIncome and OtherComprehensiveIncomeNetOfTaxes are tagged with equal values in every real filing; the second is a known duplicate and a differing value raises a review item.
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:OtherComprehensiveIncome"] }
+    labels: ["Total other comprehensive income net of tax"]
+  eps_basic:
+    label: Basic earnings per share
+    description: Continuing and discontinued operations combined (banking - after extraordinary items).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR_PER_SHARE
+    xbrl_concepts:
+      indas: ["in-capmkt:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations"]
+      banking: ["in-capmkt:BasicEarningsPerShareAfterExtraordinaryItems"]
+  eps_diluted:
+    label: Diluted earnings per share
+    description: Continuing and discontinued operations combined (banking - after extraordinary items).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR_PER_SHARE
+    xbrl_concepts:
+      indas: ["in-capmkt:DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations"]
+      banking: ["in-capmkt:DilutedEarningsPerShareAfterExtraordinaryItems"]
+
+  # ---------------------------------------------------------------- balance sheet (instants)
+  ppe:
+    label: Property, plant and equipment
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:PropertyPlantAndEquipment"] }
+    labels: ["Property, plant and equipment"]
+  cwip:
+    label: Capital work-in-progress
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CapitalWorkInProgress"] }
+    labels: ["Capital work-in-progress"]
+  intangible_assets:
+    label: Other intangible assets
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:OtherIntangibleAssets"] }
+    labels: ["Other intangible assets"]
+  goodwill:
+    label: Goodwill
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Goodwill"] }
+  non_current_investments:
+    label: Non-current investments
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:NoncurrentInvestments"] }
+  inventories:
+    label: Inventories
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Inventories"] }
+  trade_receivables_current:
+    label: Trade receivables (current)
+    description: M07 adds the current and non-current concepts where a metric needs the total (for example DSO).
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:TradeReceivablesCurrent"] }
+    labels: ["Trade receivables"]
+  trade_receivables_noncurrent:
+    label: Trade receivables (non-current)
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:TradeReceivablesNoncurrent"] }
+  cash_and_equivalents:
+    label: Cash and cash equivalents
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CashAndCashEquivalents"] }
+    labels: ["Cash and cash equivalents"]
+  other_bank_balances:
+    label: Bank balances other than cash and cash equivalents
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:BankBalanceOtherThanCashAndCashEquivalents"] }
+    labels: ["Bank balances other than cash and cash equivalents"]
+  current_investments:
+    label: Current investments
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CurrentInvestments"] }
+  total_current_assets:
+    label: Total current assets
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CurrentAssets"] }
+    labels: ["Total current assets"]
+  total_assets:
+    label: Total assets
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Assets"], banking: ["in-capmkt:Assets"] }
+    labels: ["Total assets"]
+  equity_share_capital:
+    label: Equity share capital
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:EquityShareCapital"] }
+  other_equity:
+    label: Other equity
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:OtherEquity"] }
+    labels: ["Other equity"]
+  total_equity:
+    label: Total equity
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Equity"] }
+    labels: ["Total equity"]
+  non_controlling_interest:
+    label: Non-controlling interest
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:NonControllingInterest"] }
+  long_term_borrowings:
+    label: Non-current borrowings
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:BorrowingsNoncurrent"] }
+  short_term_borrowings:
+    label: Current borrowings
+    description: Includes current maturities of long-term debt (the tag is BorrowingsCurrent).
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:BorrowingsCurrent"] }
+  lease_liabilities:
+    label: Lease liabilities
+    description: "TODO: no lease-liability QName is tagged in any real filing seen so far, so there is no XBRL mapping; add one when a filing carries it."
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+  trade_payables_current:
+    label: Trade payables (current)
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:TradePayablesCurrent"] }
+  trade_payables_noncurrent:
+    label: Trade payables (non-current)
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:TradePayablesNoncurrent"] }
+  total_current_liabilities:
+    label: Total current liabilities
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:CurrentLiabilities"] }
+    labels: ["Total current liabilities"]
+  total_liabilities:
+    label: Total liabilities
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:Liabilities"] }
+    labels: ["Total liabilities"]
+  total_equity_and_liabilities:
+    label: Total equity and liabilities
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:EquityAndLiabilities"]
+      banking: ["in-capmkt:CapitalAndLiabilities"]
+    labels: ["Total equity and liabilities"]
+
+  # ---------------------------------------------------------------- cash flow
+  cfo:
+    label: Net cash flows from operating activities
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:CashFlowsFromUsedInOperatingActivities"]
+      banking: ["in-capmkt:CashFlowsFromUsedInOperatingActivities"]
+    labels: ["Net cash generated from operating activities"]
+  cfi:
+    label: Net cash flows from investing activities
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:CashFlowsFromUsedInInvestingActivities"]
+      banking: ["in-capmkt:CashFlowsFromUsedInInvestingActivities"]
+    labels: ["Net cash used in investing activities"]
+  cff:
+    label: Net cash flows from financing activities
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:CashFlowsFromUsedInFinancingActivities"]
+      banking: ["in-capmkt:CashFlowsFromUsedInFinancingActivities"]
+    labels: ["Net cash used in financing activities"]
+  capex_ppe:
+    label: Purchase of property, plant and equipment
+    description: Outflow reported as a positive number. The banking family tags tangible assets.
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    sign_convention: outflow_positive
+    pdf_sign: negate   # the PDF prints outflows as negatives
+    xbrl_concepts:
+      indas: ["in-capmkt:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"]
+      banking: ["in-capmkt:PurchaseOfTangibleAssetsClassifiedAsInvestingActivities"]
+  capex_intangibles:
+    label: Purchase of intangible assets
+    description: Outflow reported as a positive number.
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    sign_convention: outflow_positive
+    pdf_sign: negate   # the PDF prints outflows as negatives
+    xbrl_concepts:
+      indas: ["in-capmkt:PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"]
+      banking: ["in-capmkt:PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"]
+  dividends_paid:
+    label: Dividends paid
+    description: Outflow reported as a positive number.
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    sign_convention: outflow_positive
+    pdf_sign: negate   # the PDF prints outflows as negatives
+    xbrl_concepts:
+      indas: ["in-capmkt:DividendsPaidClassifiedAsFinancingActivities"]
+      banking: ["in-capmkt:DividendsPaidClassifiedAsFinancingActivities"]
+    labels: ["Dividends paid"]
+  net_change_in_cash:
+    label: Net increase (decrease) in cash and cash equivalents
+    statement: cash_flow
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:IncreaseDecreaseInCashAndCashEquivalents"]
+      banking: ["in-capmkt:IncreaseDecreaseInCashAndCashEquivalents"]
+    labels: ["Net increase in cash and cash equivalents"]
+  closing_cash:
+    label: Cash and cash equivalents at the end of the period
+    description: The same QName also carries the opening balance, as an instant before the start of the cash-flow period; that instant maps to opening_concept.
+    statement: cash_flow
+    period_kind: instant
+    unit: INR
+    opening_concept: opening_cash
+    xbrl_concepts:
+      indas: ["in-capmkt:CashAndCashEquivalentsCashFlowStatement"]
+      banking: ["in-capmkt:CashAndCashEquivalentsCashFlowStatement"]
+    labels: ["Cash and cash equivalents at the closing of the year"]
+  opening_cash:
+    label: Cash and cash equivalents at the beginning of the period
+    description: Instant at the prior period end (the day before the cash-flow period starts). M06 checks it equals closing_cash at that date.
+    statement: cash_flow
+    period_kind: instant
+    unit: INR
+    labels: ["Cash and cash equivalents at the beginning of the year"]
+
+  # ---------------------------------------------------------------- banks only
+  bank_interest_earned:
+    label: Interest earned
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:InterestEarned"] }
+  bank_interest_expended:
+    label: Interest expended
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:InterestExpended"] }
+  bank_operating_expenses:
+    label: Operating expenses
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:OperatingExpenses"] }
+  bank_provisions:
+    label: Provisions other than tax and contingencies
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:ProvisionsOtherThanTaxAndContingencies"] }
+  bank_deposits:
+    label: Deposits
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:Deposits"] }
+  bank_advances:
+    label: Advances
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:Advances"] }
+  bank_borrowings:
+    label: Borrowings
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:Borrowings"] }
+  bank_share_capital:
+    label: Capital
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:Capital"] }
+  bank_reserves_and_surplus:
+    label: Reserves and surplus
+    statement: balance_sheet
+    period_kind: instant
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:ReservesAndSurplus"] }
+
+
+# QNames seen in real filings (entity-total facts) that are understood and deliberately not mapped.
+# Counted by reason in the stats and in `finrag normalize report`; never queued for review.
+# Promote one to `concepts` when a metric needs it.
+  bank_operating_profit_before_provisions:
+    label: Operating profit before provisions and contingencies
+    description: The key bank profitability line, as reported by the bank (not computed by FinRAG).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    xbrl_concepts: { banking: ["in-capmkt:OperatingProfitBeforeProvisionAndContingencies"] }
+  bank_gross_npa:
+    label: Gross non-performing assets
+    description: Real values appear only in standalone filings. The consolidated filings tag 0, which is not a disclosure; such zeros are not stored (zero_is_placeholder). A stock measure, never derived from cumulative periods.
+    statement: other
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    zero_is_placeholder: true
+    derivable: false
+    xbrl_concepts: { banking: ["in-capmkt:GrossNonPerformingAssets"] }
+  bank_net_npa:
+    label: Net non-performing assets
+    description: Tag NonPerformingAssets (HDFC Bank Q1 FY27 standalone - 123.57 bn against gross 358.46 bn, 0.41 % against 1.17 %). Zero in consolidated filings is a placeholder, not stored.
+    statement: other
+    period_kind: duration
+    unit: INR
+    sectors: [bank]
+    zero_is_placeholder: true
+    derivable: false
+    xbrl_concepts: { banking: ["in-capmkt:NonPerformingAssets"] }
+  bank_gross_npa_ratio:
+    label: Gross NPA ratio
+    description: Stored as a ratio (0.0117 = 1.17 %). Zero in consolidated filings is a placeholder, not stored.
+    statement: other
+    period_kind: duration
+    unit: RATIO
+    sectors: [bank]
+    zero_is_placeholder: true
+    derivable: false
+    xbrl_concepts: { banking: ["in-capmkt:PercentageOfGrossNpa"] }
+  bank_net_npa_ratio:
+    label: Net NPA ratio
+    description: Stored as a ratio (0.0041 = 0.41 %). Zero in consolidated filings is a placeholder, not stored.
+    statement: other
+    period_kind: duration
+    unit: RATIO
+    sectors: [bank]
+    zero_is_placeholder: true
+    derivable: false
+    xbrl_concepts: { banking: ["in-capmkt:PercentageOfNpa"] }
+  bank_cet1_ratio:
+    label: Common equity tier 1 ratio
+    description: Stored as a ratio (0.1957 = 19.57 %). Zero in consolidated filings is a placeholder, not stored.
+    statement: other
+    period_kind: duration
+    unit: RATIO
+    sectors: [bank]
+    zero_is_placeholder: true
+    derivable: false
+    xbrl_concepts: { banking: ["in-capmkt:CET1Ratio"] }
+
+
+known_unmapped:
+  indas:
+    "in-capmkt:BiologicalAssetsOtherThanBearerPlants": "balance_sheet_item"
+    "in-capmkt:CurrentFinancialAssets": "balance_sheet_item"
+    "in-capmkt:CurrentFinancialLiabilities": "balance_sheet_item"
+    "in-capmkt:CurrentTaxAssets": "balance_sheet_item"
+    "in-capmkt:CurrentTaxLiabilities": "balance_sheet_item"
+    "in-capmkt:DeferredGovernmentGrantsCurrent": "balance_sheet_item"
+    "in-capmkt:DeferredGovernmentGrantsNoncurrent": "balance_sheet_item"
+    "in-capmkt:DeferredTaxAssetsNet": "balance_sheet_item"
+    "in-capmkt:DeferredTaxLiabilitiesNet": "balance_sheet_item"
+    "in-capmkt:EquityAttributableToOwnersOfParent": "balance_sheet_item"
+    "in-capmkt:IntangibleAssetsUnderDevelopment": "balance_sheet_item"
+    "in-capmkt:InvestmentProperty": "balance_sheet_item"
+    "in-capmkt:InvestmentsAccountedForUsingEquityMethod": "balance_sheet_item"
+    "in-capmkt:LiabilitiesDirectlyAssociatedWithAssetsInDisposalGroupClassifiedAsHeldForSale": "balance_sheet_item"
+    "in-capmkt:LoansCurrent": "balance_sheet_item"
+    "in-capmkt:LoansNoncurrent": "balance_sheet_item"
+    "in-capmkt:NoncurrentAssets": "balance_sheet_item"
+    "in-capmkt:NoncurrentAssetsClassifiedAsHeldForSale": "balance_sheet_item"
+    "in-capmkt:NoncurrentFinancialAssets": "balance_sheet_item"
+    "in-capmkt:NoncurrentFinancialLiabilities": "balance_sheet_item"
+    "in-capmkt:NoncurrentLiabilities": "balance_sheet_item"
+    "in-capmkt:OtherCurrentAssets": "balance_sheet_item"
+    "in-capmkt:OtherCurrentFinancialAssets": "balance_sheet_item"
+    "in-capmkt:OtherCurrentFinancialLiabilities": "balance_sheet_item"
+    "in-capmkt:OtherCurrentLiabilities": "balance_sheet_item"
+    "in-capmkt:OtherNoncurrentAssets": "balance_sheet_item"
+    "in-capmkt:OtherNoncurrentFinancialAssets": "balance_sheet_item"
+    "in-capmkt:OtherNoncurrentFinancialLiabilities": "balance_sheet_item"
+    "in-capmkt:OtherNoncurrentLiabilities": "balance_sheet_item"
+    "in-capmkt:ProvisionsCurrent": "balance_sheet_item"
+    "in-capmkt:ProvisionsNoncurrent": "balance_sheet_item"
+    "in-capmkt:RegulatoryDeferralAccountCreditBalancesAndRelatedDeferredTaxLiability": "balance_sheet_item"
+    "in-capmkt:RegulatoryDeferralAccountDebitBalancesAndRelatedDeferredTaxAssets": "balance_sheet_item"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInInventories": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInOtherCurrentAssets": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInOtherNoncurrentAssets": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInTradeReceivablesCurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInTradeReceivablesNoncurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDepreciationAndAmortisationExpense": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDividendIncome": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForFairValueGainsLosses": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForFinanceCosts": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForImpairmentLossReversalOfImpairmentLossRecognisedInProfitOrLoss": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInOtherCurrentLiabilities": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInOtherNoncurrentLiabilities": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInTradePayablesCurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInTradePayablesNoncurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForInterestIncome": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForOtherBankBalances": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForOtherFinancialAssetsCurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForOtherFinancialAssetsNoncurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForOtherFinancialLiabilitiesCurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForOtherFinancialLiabilitiesNoncurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForProvisionsCurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForProvisionsNoncurrent": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForReconcileProfitLoss": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForSharebasedPayments": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForUndistributedProfitsOfAssociates": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForUnrealisedForeignExchangeLossesGains": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsForNoncashItems": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsForWhichCashEffectsAreInvestingOrFinancingCashFlow": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsToReconcileProfitLoss": "cash_flow_adjustment"
+    "in-capmkt:CashAdvancesAndLoansMadeToOtherPartiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashFlowsFromLosingControlOfSubsidiariesOrOtherBusinessesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashFlowsFromUsedInOperations": "cash_flow_item"
+    "in-capmkt:CashFlowsUsedInObtainingControlOfSubsidiariesOrOtherBusinessesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashPaymentForInvestmentInPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "cash_flow_item"
+    "in-capmkt:CashPaymentsForFutureContractsForwardContractsOptionContractsAndSwapContractsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromFutureContractsForwardContractsOptionContractsAndSwapContractsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromRepaymentOfAdvancesAndLoansMadeToOtherPartiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromShareOfProfitsOfPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "cash_flow_item"
+    "in-capmkt:DividendsReceivedClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:DividendsReceivedClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:EffectOfExchangeRateChangesOnCashAndCashEquivalents": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:IncreaseDecreaseInCashAndCashEquivalentsBeforeEffectOfExchangeRateChanges": "cash_flow_item"
+    "in-capmkt:InterestPaidClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:InterestPaidClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:InterestReceivedClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:InterestReceivedClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashPaymentsToAcquireEquityOrDebtInstrumentsOfOtherEntitiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashPaymentsToAcquireInterestsInJointVenturesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashReceiptsFromSalesOfEquityOrDebtInstrumentsOfOtherEntitiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashReceiptsFromSalesOfInterestsInJointVenturesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:PaymentsFromChangesInOwnershipInterestsInSubsidiaries": "cash_flow_item"
+    "in-capmkt:PaymentsOfLeaseLiabilitiesClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:PaymentsOfOtherEquityInstruments": "cash_flow_item"
+    "in-capmkt:PaymentsToAcquireOrRedeemEntitysShares": "cash_flow_item"
+    "in-capmkt:ProceedsFromBiologicalAssetsOtherThanBearerPlantsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromBorrowingsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromChangesInOwnershipInterestsInSubsidiaries": "cash_flow_item"
+    "in-capmkt:ProceedsFromExerciseOfStockOptions": "cash_flow_item"
+    "in-capmkt:ProceedsFromGovernmentGrantsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingDebenturesNotesBondsEtc": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingOtherEquityInstruments": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingSharesClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfGoodwillClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfIntangibleAssetsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfIntangibleAssetsUnderDevelopment": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfInvestmentPropertyClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfOtherLongTermAssetsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:PurchaseOfBiologicalAssetsOtherThanBearerPlantsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:PurchaseOfGoodwillClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:PurchaseOfIntangibleAssetsUnderDevelopment": "cash_flow_item"
+    "in-capmkt:PurchaseOfInvestmentPropertyClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:PurchaseOfOtherLongTermAssetsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:RepaymentsOfBorrowingsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:OtherComprehensiveIncomeNetOfTaxes": { reason: "duplicate_of:other_comprehensive_income", note: "Equal to OtherComprehensiveIncome in every real filing; a filing where the two differ raises a review item (normalization_issue)." }
+    "in-capmkt:AmountOfItemThatWillBeReclassifiedToProfitAndLoss": "income_statement_item"
+    "in-capmkt:AmountOfItemThatWillNotBeReclassifiedToProfitAndLoss": "income_statement_item"
+    "in-capmkt:BasicEarningsLossPerShareFromContinuingOperations": "income_statement_item"
+    "in-capmkt:BasicEarningsLossPerShareFromDiscontinuedOperations": "income_statement_item"
+    "in-capmkt:ComprehensiveIncomeForThePeriod": "income_statement_item"
+    "in-capmkt:ComprehensiveIncomeForThePeriodAttributableToOwnersOfParent": "income_statement_item"
+    "in-capmkt:ComprehensiveIncomeForThePeriodAttributableToOwnersOfParentNonControllingInterests": "income_statement_item"
+    "in-capmkt:CurrentTax": "income_statement_item"
+    "in-capmkt:DeferredTax": "income_statement_item"
+    "in-capmkt:DilutedEarningsLossPerShareFromContinuingOperations": "income_statement_item"
+    "in-capmkt:DilutedEarningsLossPerShareFromDiscontinuedOperations": "income_statement_item"
+    "in-capmkt:IncomeTaxRelatingToItemsThatWillBeReclassifiedToProfitOrLoss": "income_statement_item"
+    "in-capmkt:IncomeTaxRelatingToItemsThatWillNotBeReclassifiedToProfitOrLoss": "income_statement_item"
+    "in-capmkt:NetMovementInRegulatoryDeferralAccountBalancesRelatedToProfitOrLossAndTheRelatedDeferredTaxMovement": "income_statement_item"
+    "in-capmkt:ProfitBeforeExceptionalItemsAndTax": "income_statement_item"
+    "in-capmkt:ProfitLossForPeriodFromContinuingOperations": "income_statement_item"
+    "in-capmkt:ProfitLossFromDiscontinuedOperationsAfterTax": "income_statement_item"
+    "in-capmkt:ProfitLossFromDiscontinuedOperationsBeforeTax": "income_statement_item"
+    "in-capmkt:ProfitOrLossAttributableToNonControllingInterests": "income_statement_item"
+    "in-capmkt:ShareOfProfitAndLossFromPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "income_statement_item"
+    "in-capmkt:ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod": "income_statement_item"
+    "in-capmkt:TaxExpenseOfDiscontinuedOperations": "income_statement_item"
+    "in-capmkt:NumberOfStatementsOfDeviationForTheCurrentQuarter": "metadata"
+    "in-capmkt:ReserveExcludingRevaluationReserves": "notes_disclosure"
+    "in-capmkt:TotalOutstandingDuesOfCreditorsOtherThanMicroEnterpriseAndSmallEnterpriseCurrent": "notes_disclosure"
+    "in-capmkt:TotalOutstandingDuesOfCreditorsOtherThanMicroEnterpriseAndSmallEnterpriseNoncurrent": "notes_disclosure"
+    "in-capmkt:TotalOutstandingDuesOfMicroEnterpriseAndSmallEnterpriseCurrent": "notes_disclosure"
+    "in-capmkt:TotalOutstandingDuesOfMicroEnterpriseAndSmallEnterpriseNoncurrent": "notes_disclosure"
+    "in-capmkt:AmountOfRelatedPartyTransactionDuringTheReportingPeriod": "related_party"
+    "in-capmkt:FaceValueOfEquityShareCapital": "share_data"
+    "in-capmkt:PaidUpValueOfEquityShareCapital": "share_data"
+  banking:
+    "in-capmkt:BalancesWithBanksAndMoneyAtCallAndShortNotice": "balance_sheet_item"
+    "in-capmkt:CashAndBalancesWithReserveBankOfIndia": "balance_sheet_item"
+    "in-capmkt:FixedAssets": "balance_sheet_item"
+    "in-capmkt:Investments": "balance_sheet_item"
+    "in-capmkt:OtherAssets": "balance_sheet_item"
+    "in-capmkt:OtherLiabilitiesAndProvisions": "balance_sheet_item"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInInventories": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInOtherCurrentAssets": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDecreaseIncreaseInTradeReceivables": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDepreciationAndAmortisationExpense": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForDividendIncome": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForFinanceCosts": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForImpairmentLossReversalOfImpairmentLossRecognisedInProfitOrLoss": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInOtherCurrentLiabilities": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForIncreaseDecreaseInTradePayables": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForProvisions": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForReconcileProfitLoss": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForSharebasedPayments": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForUnrealisedForeignExchangeLossesGains": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsForWorkingCapital": "cash_flow_adjustment"
+    "in-capmkt:AdjustmentsToProfitLoss": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsForNoncashItems": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsForWhichCashEffectsAreInvestingOrFinancingCashFlow": "cash_flow_adjustment"
+    "in-capmkt:OtherAdjustmentsToReconcileProfitLoss": "cash_flow_adjustment"
+    "in-capmkt:CashAdvancesAndLoansMadeToOtherPartiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashFlowsFromLosingControlOfSubsidiariesOrOtherBusinessesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashFlowsFromUsedInFinancingActivitiesBeforeExtraordinaryItems": "cash_flow_item"
+    "in-capmkt:CashFlowsFromUsedInInvestingActivitiesBeforeExtraordinaryItems": "cash_flow_item"
+    "in-capmkt:CashFlowsFromUsedInOperatingActivitiesBeforeExtraordinaryItems": "cash_flow_item"
+    "in-capmkt:CashFlowsFromUsedInOperations": "cash_flow_item"
+    "in-capmkt:CashFlowsUsedInObtainingControlOfSubsidiariesOrOtherBusinessesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashPaymentForInvestmentInPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "cash_flow_item"
+    "in-capmkt:CashPaymentsForFutureContractsForwardContractsOptionContractsAndSwapContractsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromFutureContractsForwardContractsOptionContractsAndSwapContractsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromRepaymentOfAdvancesAndLoansMadeToOtherPartiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:CashReceiptsFromShareOfProfitsOfPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "cash_flow_item"
+    "in-capmkt:DividendsReceivedClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:DividendsReceivedClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:EffectOfExchangeRateChangesOnCashAndCashEquivalents": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:IncomeTaxesPaidRefundClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:IncreaseDecreaseInCashAndCashEquivalentsBeforeEffectOfExchangeRateChanges": "cash_flow_item"
+    "in-capmkt:InterestPaidClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:InterestPaidClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:InterestReceivedClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:InterestReceivedClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashPaymentsToAcquireEquityOrDebtInstrumentsOfOtherEntitiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashPaymentsToAcquireInterestsInJointVenturesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashReceiptsFromSalesOfEquityOrDebtInstrumentsOfOtherEntitiesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherCashReceiptsFromSalesOfInterestsInJointVenturesClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:OtherInflowsOutflowsOfCashClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:PaymentForExtraordinaryItemsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:PaymentForExtraordinaryItemsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:PaymentForExtraordinaryItemsClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromBorrowingsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromExtraordinaryItemsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromExtraordinaryItemsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromExtraordinaryItemsClassifiedAsOperatingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromGovernmentGrantsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingDebenturesNotesBondsEtc": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingOtherEquityInstruments": "cash_flow_item"
+    "in-capmkt:ProceedsFromIssuingShares": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfIntangibleAssetsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:ProceedsFromSalesOfTangibleAssetsClassifiedAsInvestingActivities": "cash_flow_item"
+    "in-capmkt:RepaymentsOfBorrowingsClassifiedAsFinancingActivities": "cash_flow_item"
+    "in-capmkt:BasicEarningsPerShareBeforeExtraordinaryItems": "income_statement_item"
+    "in-capmkt:DilutedEarningsPerShareBeforeExtraordinaryItems": "income_statement_item"
+    "in-capmkt:ExpenditureExcludingProvisionsAndContingencies": "income_statement_item"
+    "in-capmkt:ExtraordinaryItems": "income_statement_item"
+    "in-capmkt:InterestOnBalancesWithReserveBankOfIndiaAndOtherInterBankFunds": "income_statement_item"
+    "in-capmkt:InterestOrDiscountOnAdvancesOrBills": "income_statement_item"
+    "in-capmkt:OtherInterest": "income_statement_item"
+    "in-capmkt:OtherOperatingExpenses": "income_statement_item"
+    "in-capmkt:ProfitBeforeExtraordinaryItemsAndTax": "income_statement_item"
+    "in-capmkt:ProfitLossFromOrdinaryActivitiesAfterTax": "income_statement_item"
+    "in-capmkt:ProfitLossOfMinorityInterest": "income_statement_item"
+    "in-capmkt:RevenueOnInvestments": "income_statement_item"
+    "in-capmkt:ShareOfProfitAndLossFromPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "income_statement_item"
+    "in-capmkt:ShareOfProfitLossOfAssociates": "income_statement_item"
+    "in-capmkt:ReserveExcludingRevaluationReserves": "notes_disclosure"
+    "in-capmkt:AdditionalTier1Ratio": "ratio"
+    "in-capmkt:PercentageOfShareHeldByGovernmentOfIndia": "ratio"
+    "in-capmkt:ReturnOnAssets": "ratio"
+    "in-capmkt:InterSegmentRevenue": "segment"
+    "in-capmkt:NetSegmentAssets": "segment"
+    "in-capmkt:NetSegmentLiabilities": "segment"
+    "in-capmkt:OtherUnallocableExpenditureNetOffUnAllocableIncome": "segment"
+    "in-capmkt:SegmentAssets": "segment"
+    "in-capmkt:SegmentFinanceCosts": "segment"
+    "in-capmkt:SegmentLiabilities": "segment"
+    "in-capmkt:SegmentProfitBeforeTax": "segment"
+    "in-capmkt:SegmentProfitLossBeforeTaxAndFinanceCosts": "segment"
+    "in-capmkt:SegmentRevenue": { reason: "segment", note: "Includes inter-segment revenue and must never be treated as revenue (HDFC Bank Q4 FY26: larger than total income)." }
+    "in-capmkt:SegmentRevenueFromOperations": { reason: "segment", note: "Includes inter-segment revenue and must never be treated as revenue." }
+    "in-capmkt:UnAllocableAssets": "segment"
+    "in-capmkt:UnAllocableLiabilities": "segment"
+    "in-capmkt:FaceValueOfEquityShareCapital": "share_data"
+    "in-capmkt:PaidUpValueOfEquityShareCapital": "share_data"

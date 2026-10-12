@@ -14,7 +14,13 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.config import get_settings
 from finrag.core.types import utc_now_iso
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
+
+# Upgrade steps from version N to N+1: plain SQL run once on an existing database (M03: v2, v3).
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    1: ("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT",),
+    2: ("ALTER TABLE parsed_facts ADD COLUMN statement_type TEXT",),
+}
 
 metadata = sa.MetaData()
 
@@ -117,6 +123,8 @@ _table(
     _int("scale"),
     _int("decimals"),
     _text("source_loc"),
+    _text("dimensions_json"),  # NULL = entity total; else JSON list of {axis, member[, typed]}
+    _text("statement_type"),  # PDF/OCR facts: page statement (profit_and_loss|balance_sheet|...)
     _text("extractor"),  # xbrl|pdf_table|ocr
     _text("ocr_backend"),  # tesseract|chandra; only when extractor = ocr
     sa.Column("confidence", sa.Float),
@@ -149,7 +157,7 @@ _table(
     "review_queue",
     _id_pk(),
     # unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only
-    # |filing_conflict|inbox_unrecognised
+    # |filing_conflict|inbox_unrecognised|normalization_issue
     _text("item_type"),
     _text("payload_json"),
     _int("occurrences"),
@@ -318,8 +326,22 @@ def reset_engines() -> None:
     _engines.clear()
 
 
+def _migrate(conn: Connection, current: int) -> None:
+    """Run the upgrade steps from `current` to SCHEMA_VERSION and record the new version."""
+    for version in range(current, SCHEMA_VERSION):
+        for statement in _MIGRATIONS[version]:
+            conn.execute(sa.text(statement))
+        conn.execute(
+            sa.insert(tables.schema_version).values(version=version + 1, applied_at=utc_now_iso())
+        )
+
+
 def init_db(engine: Engine | None = None) -> None:
-    """Create any missing tables and record the schema version; never alters existing data."""
+    """Create missing tables, upgrade an older schema step by step, record the version.
+
+    Existing rows are never changed; an upgrade only adds columns. A database newer than the
+    code, or older than the first known migration, raises SchemaVersionError.
+    """
     if engine is None:
         get_settings().paths.db.parent.mkdir(parents=True, exist_ok=True)
         engine = get_engine()
@@ -332,6 +354,10 @@ def init_db(engine: Engine | None = None) -> None:
                     version=SCHEMA_VERSION, applied_at=utc_now_iso()
                 )
             )
+        elif current < SCHEMA_VERSION and all(
+            v in _MIGRATIONS for v in range(current, SCHEMA_VERSION)
+        ):
+            _migrate(conn, current)
         elif current != SCHEMA_VERSION:
             raise SchemaVersionError(
                 f"database schema version is {current}, code expects {SCHEMA_VERSION}"

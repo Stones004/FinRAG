@@ -4,3 +4,115 @@
 # remaining transcript_markers keys; extend this file, do not replace it.
 transcript_markers:
   qa_start: '(?i)question\s+is\s+from\s+the\s+line\s+of'     # first match (in any speaker's turn) starts Q&A, at the start of that turn
+
+# --- M03: statement pages and table headers (starting patterns; extend from real filings) ---
+# All patterns are case-insensitive regular expressions searched in the page text.
+statement_pages:
+  profit_and_loss:
+    - 'statement\s+of\s+(?:standalone\s+|consolidated\s+)?(?:audited\s+)?(?:profit|financial\s+results)'
+    - 'total\s+income'
+    - 'profit\s+before\s+(?:exceptional\s+items\s+and\s+)?tax'
+    - 'earnings\s+per\s+(?:equity\s+)?share'
+  balance_sheet:
+    - 'balance\s+sheet'
+    - 'statement\s+of\s+assets\s+and\s+liabilities'
+    - 'total\s+equity\s+and\s+liabilities'
+    - 'total\s+assets'
+  cash_flow:
+    - 'cash\s+flows?'
+    - 'cash\s+generated\s+from\s+operations'
+    - 'net\s+cash\s+(?:flows?\s+)?(?:generated\s+from|used\s+in|from)'
+  segment:
+    - 'segment\s+(?:revenue|results?|assets|liabilities|information)'
+    - 'reportable\s+segments?'
+basis_patterns:
+  consolidated: ['consolidated']
+  standalone: ['standalone', 'stand[\s-]*alone']
+unit_patterns:   # regex -> unit key in settings.units.multipliers
+  # The rupee sign often comes out as a backtick or "Rs" in PDF text, so a currency mark may sit
+  # between "in" and the unit ("Amount in ` millions").
+  crore:   ['in\s*(?:[₹`]|rs\.?|inr)?\s*crores?', '[₹`]\s*crores?']
+  lakh:    ['in\s*(?:[₹`]|rs\.?|inr)?\s*lakhs?', '[₹`]\s*lakhs?']
+  million: ['in\s*(?:[₹`]|rs\.?|inr)?\s*millions?', '[₹`]\s*millions?']
+  thousand: ['in\s*(?:[₹`]|rs\.?|inr)?\s*thousands?', 'in\s*(?:[₹`]|rs\.?|inr)?\s*''000']
+
+# Column headers of a statement table (read by pdf_tables).
+table_header:
+  date_patterns:   # named groups: d (day), y (year), and m (month number) or mon (month name)
+    - '(?P<d>\d{1,2})\s*[-./]\s*(?P<m>\d{1,2})\s*[-./]\s*(?P<y>\d{4})'
+    - '(?P<d>\d{1,2})(?:st|nd|rd|th)?\s+(?P<mon>[A-Za-z]{3,9})\.?,?\s+(?P<y>\d{4})'
+    - '(?P<mon>[A-Za-z]{3,9})\.?\s+(?P<d>\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(?P<y>\d{4})'
+  period_kinds:    # first match wins, so list the more specific kinds first; type = PeriodType
+    - {type: 9M, patterns: ['nine\s+months?', '9\s*months?']}
+    - {type: H,  patterns: ['half[\s-]*year', 'six\s+months?', '6\s*months?']}
+    - {type: Q,  patterns: ['quarter']}
+    - {type: FY, patterns: ['year\s+ended', 'year\s+ending', 'full\s+year', 'financial\s+year']}
+  months_in_kind: {Q: 3, H: 6, 9M: 9, FY: 12}
+
+# Row labels that wrap over two lines: a label-only line joins the next numeric row's label when
+# it ends in one of these words (or in a comma / hyphen) or the next line starts in lower case.
+table_labels:
+  continuation_words: ['and', 'or', 'of', 'the', 'to', 'for', 'in', 'on', 'from', 'with', 'by', 'a', 'an', 'at', 'under']
+
+# Words that count as "known" in the text-quality score, on top of config/vocab/common_en.txt.
+# Statement terms, abbreviations and filing words that a general English list lacks.
+financial_terms:
+  - ebitda
+  - ebit
+  - pat
+  - pbt
+  - eps
+  - ind
+  - sebi
+  - nse
+  - bse
+  - isin
+  - cin
+  - gst
+  - msme
+  - csr
+  - inr
+  - lakh
+  - lakhs
+  - crore
+  - crores
+  - ltd
+  - llp
+  - pvt
+  - rs
+  - nil
+  - ifrs
+  - icai
+  - caro
+  - mdna
+  - xbrl
+  - audited
+  - unaudited
+  - standalone
+  - consolidated
+  - depreciation
+  - amortisation
+  - amortization
+  - intangible
+  - intangibles
+  - inventories
+  - receivables
+  - payables
+  - borrowings
+  - derivative
+  - derivatives
+  - noncontrolling
+  - comprehensive
+  - exceptional
+  - annualised
+  - annualized
+  - subsidiaries
+  - associates
+  - promoter
+  - promoters
+  - ordinary
+  - debentures
+  - dividend
+  - dividends
+  - reserves
+  - surplus

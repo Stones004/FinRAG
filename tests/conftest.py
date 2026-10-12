@@ -12,6 +12,22 @@ import pytest
 from finrag.core import config, db
 from finrag.core.logging import reset_logging
 
+
+def running_elevated() -> bool:
+    """True when the process is root/administrator, so the OS lets it write read-only files."""
+    if hasattr(os, "geteuid"):
+        return os.geteuid() == 0
+    import ctypes
+
+    return bool(ctypes.windll.shell32.IsUserAnAdmin())
+
+
+@pytest.fixture
+def elevated() -> bool:
+    """Whether the tests run with elevated rights (write-permission checks cannot fail then)."""
+    return running_elevated()
+
+
 REAL_SETTINGS = Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
 
 

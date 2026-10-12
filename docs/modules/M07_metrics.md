@@ -45,6 +45,7 @@ Formula language: numbers, input aliases, `+ - * /`, parentheses, functions `avg
 | `pat_growth_yoy` | `pat / abs(pat_ly) - 1` | Q,H,9M,FY | limitation: unstable when last year near zero |
 | `operating_margin_change_yoy` | `om - om_ly` | Q,H,9M,FY | unit RATIO, display as percentage points |
 | `equity_owners` (helper) | `te - nci` | INSTANT | nci `missing: zero` |
+| `bank_equity` (helper) | `bank_share_capital + bank_reserves_and_surplus` | INSTANT | banks tag no total equity; this is a helper metric, not a taxonomy concept |
 | `capital_employed` (helper) | `te + ltb + stb + ll` | INSTANT | ll (lease liabilities) `missing: zero` |
 | `roe` | `pat_owners / avg(eq, eq_ly)` | FY | eq = `equity_owners` `at: period_end`; eq_ly = same with `offset: {years: -1}` |
 | `roce` | `op / avg(ce, ce_ly)` | FY | ce = helper metric `capital_employed` = equity + borrowings + lease liabilities |
@@ -53,6 +54,8 @@ Formula language: numbers, input aliases, `+ - * /`, parentheses, functions `avg
 | `cfo_to_pat` | `cfo / pat` | H, FY | cash flow is generally not quarterly |
 | `fcf` | `cfo - capex` | H, FY | taxonomy normalizes `capex_ppe` to a positive outflow |
 | `dso` | `rec / rev * days` | FY | `days` = 365 constant defined in the formula input as `{ constant: 365 }`; uses closing receivables (limitation) |
+
+Receivables and payables are split in the taxonomy (`trade_receivables_current` / `_noncurrent`, `trade_payables_current` / `_noncurrent`): metrics that need the total (DSO, DPO) sum the two (`missing: zero` for the non-current one). Concepts with `sign_convention: outflow_positive` hold positive outflows in both XBRL and (after M04's `pdf_sign`) PDF facts.
 
 Add `constant:` as an input option for fixed numbers so formulas contain no magic literals beyond those declared.
 

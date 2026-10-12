@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 from datetime import date
 from pathlib import Path
 
@@ -41,14 +42,18 @@ def drop(inbox: Path, name: str, data: bytes) -> Path:
     return path
 
 
-def test_1_correctly_named_file_gives_one_row_and_a_read_only_raw_copy(db, kit, inbox) -> None:
+def test_1_correctly_named_file_gives_one_row_and_a_read_only_raw_copy(
+    db, kit, inbox, elevated
+) -> None:
     drop(inbox, NAME, kit.make_xbrl())
     run_inbox()
     (row,) = filings()
     assert (row.isin, row.filing_type, row.status) == (kit.ALPHA, "financial_results", "fetched")
     raw = Path(row.raw_path)
     assert raw.is_file() and raw.parent.name == "FY26" and raw.name == f"{row.filing_id}.xml"
-    assert not os.access(raw, os.W_OK)
+    assert not raw.stat().st_mode & stat.S_IWRITE
+    if not elevated:  # root/administrator can write regardless of the mode bits
+        assert not os.access(raw, os.W_OK)
     assert not (inbox / NAME).exists()
     assert (get_settings().paths.inbox_processed / NAME).is_file()
 

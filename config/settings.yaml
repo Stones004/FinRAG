@@ -27,6 +27,7 @@ paths:
   sections: ./config/sections.yaml
   intents: ./config/intents.yaml
   prompts: ./config/prompts            # versioned prompt templates: prompts/<version>/*.txt
+  vocab_common_en: ./config/vocab/common_en.txt   # common English words, one per line (text-quality score)
 
 fiscal:
   fy_start_month: 4                    # April
@@ -100,6 +101,13 @@ parsing:
     ocr_lang: eng
     ocr_dpi: 300
     backend: tesseract                 # tesseract | chandra
+    tesseract_cmd: ""                   # path to tesseract.exe; blank = use PATH
+    # Table rules (long dark lines) make Tesseract skip the text inside ruled header boxes, so lines
+    # at least this long (points) are erased from the page image first. 0 = leave the image alone.
+    rule_min_length_pt: 24
+    # One OCR pass per entry. The first pass gives the page text and the first words; each later
+    # pass only adds words that do not overlap one already found.
+    tesseract_passes: ["--psm 3", "--psm 11"]
     chandra:
       base_url: http://localhost:1234/v1   # LM Studio OpenAI-compatible server
       model: ""                        # [VERIFY] e.g. chandra-ocr-2 Q4_K_M/Q6_K GGUF loaded in LM Studio
@@ -107,9 +115,18 @@ parsing:
       max_image_px: 2000
   pdf:
     min_text_chars_for_native: 200     # below this a page is treated as scanned
-    min_text_quality: 0.85             # share of recognisable tokens; below this re-OCR the page
+    min_text_quality: 0.70             # share of recognisable tokens; below this re-OCR the page (calibrated 2026-10-12, see PROGRESS)
     min_table_confidence: 0.7          # below this a table goes to review_queue
+    unit_inherited_confidence_penalty: 0.05  # taken off a fact whose unit line came from an earlier statement page
+    format_outlier_confidence: 0.3     # cap for a number whose decimal places differ from the table's usual (OCR drops points)
     statement_page_min_score: 2        # keyword hits needed to classify a statement page
+    quality_min_token_len: 3           # text-quality score counts alphabetic tokens at least this long
+    row_tolerance_pt: 4.0              # words this close vertically (points) are one table row
+    column_tolerance_pt: 10.0          # numbers whose right edges are this close (points) share a column
+    min_table_rows: 3                  # numeric rows needed to read a page as a table
+    column_min_support_ratio: 0.25     # a column needs this share of the best column's numbers (drops stray numbers)
+    header_max_lines: 8                # lines above the first numeric row scanned for column headers
+    basis_scan_lines: 15               # first lines of a page searched for standalone / consolidated
 
 normalize:
   fuzzy_suggest_min_score: 85          # fuzzy label matches are only SUGGESTED in the review queue

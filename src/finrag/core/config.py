@@ -73,6 +73,7 @@ class PathsSettings(_Model):
     sections: Path
     intents: Path
     prompts: Path
+    vocab_common_en: Path
 
     @field_validator("*", mode="after")
     @classmethod
@@ -204,6 +205,13 @@ class OcrSettings(_Model):
     ocr_lang: str
     ocr_dpi: int = Field(gt=0)
     backend: Literal["tesseract", "chandra"]
+    tesseract_cmd: str  # blank = find tesseract on PATH
+    rule_min_length_pt: float = Field(
+        ge=0
+    )  # ruled lines at least this long are erased before OCR; 0 = off
+    tesseract_passes: list[str] = Field(
+        min_length=1
+    )  # tesseract options per pass; see ocr/tesseract.py
     chandra: ChandraSettings
 
 
@@ -211,7 +219,22 @@ class PdfSettings(_Model):
     min_text_chars_for_native: int = Field(ge=0)
     min_text_quality: float = Field(ge=0, le=1)
     min_table_confidence: float = Field(ge=0, le=1)
+    unit_inherited_confidence_penalty: float = Field(
+        ge=0, le=1
+    )  # taken off facts using a unit from another page
+    format_outlier_confidence: float = Field(ge=0, le=1)  # cap for a number with unusual decimals
     statement_page_min_score: int = Field(ge=0)
+    quality_min_token_len: int = Field(ge=1)  # shortest alphabetic token the quality score counts
+    row_tolerance_pt: float = Field(gt=0)  # words within this vertical distance share a table row
+    column_tolerance_pt: float = Field(gt=0)  # right edges within this distance share a column
+    min_table_rows: int = Field(ge=1)  # numeric rows needed before a page is read as a table
+    column_min_support_ratio: float = Field(ge=0, le=1)  # weakest column vs the strongest
+    header_max_lines: int = Field(
+        ge=1
+    )  # text lines above the first numeric row scanned for headers
+    basis_scan_lines: int = Field(
+        ge=1
+    )  # first lines of a page searched for standalone/consolidated
 
 
 class ParsingSettings(_Model):

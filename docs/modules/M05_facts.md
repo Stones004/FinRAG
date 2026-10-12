@@ -8,7 +8,7 @@ Write canonical facts append-only, detect restatements, derive discrete periods 
 ## Files
 
 ### `facts/writer.py`
-- **Input:** `list[CanonicalCandidate]` from M04.
+- **Input:** `list[CanonicalCandidate]` from M04 (dataclass in `normalize/models.py`). Entry point `write_candidates(candidates)`, which M04's runner and `finrag normalize run` call.
 - **Process:** for each candidate, look for an existing fact with the same (isin, concept, period_start, period_end, basis):
   - none → insert;
   - same value and same source filing → skip (idempotent rerun);
@@ -25,13 +25,14 @@ Write canonical facts append-only, detect restatements, derive discrete periods 
 - **Input:** isin, concept(s), period(s), basis.
 - **Process:** latest fact by `filed_on`, then `revision_no` of its filing, then `created_at` (an original and its revision share the board-meeting date that XBRL gives as `filed_on`, so `revision_no` decides); filings with status `quarantined` are never a source; option `as_of=<date>` returns what was known on that date.
 - **Output:** `get_fact(...) -> Fact | None`, `get_facts(...) -> list[Fact]`, `get_series(isin, concept, period_type, basis, n)`.
+- **Source precedence:** an XBRL fact always wins over a PDF/OCR fact (`extractor` `pdf_table`/`ocr`) for the same ISIN, concept, period and basis, whichever is later or has a higher `confidence`. PDF/OCR facts only fill gaps (no XBRL fact exists for that key) and are never the "current" value over an XBRL one; both rows stay in the store (append-only), and a restatement is never recorded between an XBRL and a PDF/OCR fact. Only when no XBRL fact exists do the latest-filed rules above apply among PDF/OCR facts. A PDF/OCR value that differs from the XBRL value beyond tolerance is a cross-check finding for the review queue, not a restatement.
 - **Rule:** every later module reads facts only through this file.
 
 ### `facts/derivation.py`
 - **Input:** current view for an ISIN; `core/fiscal.components_of`.
 - **Process:** for duration concepts only, derive a missing discrete period when all required inputs exist:
   `Q2 = H1 − Q1`, `Q3 = 9M − H1`, `Q4 = FY − 9M`, `H2 = FY − H1`.
-  Never derive instants. Never derive if any input is missing or blocked. Record `is_derived=1` and `derivation_json = {formula, input_fact_ids}`.
+  Never derive instants, and never derive a concept whose taxonomy entry has `derivable: false` (NPA amounts and ratios). Never derive if any input is missing or blocked. Record `is_derived=1` and `derivation_json = {formula, input_fact_ids}`.
 - **Output:** derived facts via `writer` (so they are also append-only).
 
 ### `facts/dependencies.py`
@@ -44,6 +45,7 @@ Write canonical facts append-only, detect restatements, derive discrete periods 
 
 ## Tests and acceptance criteria
 1. Writing the same candidates twice → no new rows.
+1a. An XBRL fact and a later PDF/OCR fact for the same key: current view returns the XBRL fact; with no XBRL fact the PDF/OCR fact is returned.
 2. A later filing with a different value → two rows; current view returns the later one; `as_of` before the later filing returns the earlier one.
 3. Restatement of 0.3% → recorded, not flagged; 2% and > ₹1 crore → flagged (tolerances from config).
 4. H1 = 400, Q1 = 150, no Q2 reported → derived Q2 = 250, marked derived with input IDs.

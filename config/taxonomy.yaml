@@ -170,6 +170,7 @@ concepts:
     statement: profit_and_loss
     period_kind: duration
     unit: INR_PER_SHARE
+    derivable: false  # weighted share counts differ between periods; never H2 = FY - H1
     xbrl_concepts:
       indas: ["in-capmkt:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations"]
       banking: ["in-capmkt:BasicEarningsPerShareAfterExtraordinaryItems"]
@@ -179,6 +180,7 @@ concepts:
     statement: profit_and_loss
     period_kind: duration
     unit: INR_PER_SHARE
+    derivable: false  # weighted share counts differ between periods; never H2 = FY - H1
     xbrl_concepts:
       indas: ["in-capmkt:DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations"]
       banking: ["in-capmkt:DilutedEarningsPerShareAfterExtraordinaryItems"]

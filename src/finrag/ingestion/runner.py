@@ -21,15 +21,18 @@ from finrag.ingestion import registry
 from finrag.ingestion.adapters.base import SourceAdapter
 from finrag.ingestion.adapters.local_inbox import FILING_TYPE_TRANSCRIPT, LocalInboxAdapter
 from finrag.ingestion.conflicts import transcript_conflicts, xbrl_conflicts
+from finrag.ingestion.filename_time import filename_timestamp
 from finrag.ingestion.models import Conflict, FilingCandidate, IngestReport, Rejected
 from finrag.ingestion.raw_store import sha256_of, store_raw
 from finrag.ingestion.registry import DbEntityLookup, RawFile
 from finrag.ingestion.transcript_check import check_transcript
-from finrag.ingestion.xbrl_meta import parse_xbrl_meta
+from finrag.ingestion.xbrl_meta import XbrlMeta, parse_xbrl_meta
 
 Mode = Literal["incremental", "backfill"]
 JOB_TYPE = "ingest"
 NEW, DUPLICATE, QUARANTINED, LINK_ONLY = "new", "duplicate", "quarantined", "link_only"
+
+DATE_LENGTH = len("2026-05-16")  # a filed_on this long is a plain date (a board-meeting date)
 
 log = get_logger("ingestion")
 
@@ -92,16 +95,60 @@ def _move_to_processed(path: Path, sha: str, settings: Settings) -> None:
     shutil.move(str(path), str(target))
 
 
+def _original_board_date(candidate: FilingCandidate, engine: Engine | None) -> str | None:
+    """A revision's original filing -> its `filed_on` when that is a plain board-meeting date."""
+    f = tables.filings
+    with transaction(engine) as conn:
+        found = conn.execute(
+            sa.select(f.c.filed_on).where(
+                f.c.isin == candidate.isin,
+                f.c.filing_type == candidate.filing_type,
+                f.c.period_end
+                == (candidate.period_end.isoformat() if candidate.period_end else None),
+                f.c.basis == candidate.basis.value,
+                f.c.format == FilingFormat.XBRL.value,
+                f.c.submission == "original",
+            )
+        ).scalars()
+        dates = [d for d in found if d and len(d) == DATE_LENGTH]
+    return dates[0] if dates else None
+
+
+def revision_filed_on(
+    candidate: FilingCandidate, meta: XbrlMeta, engine: Engine | None = None
+) -> str | None:
+    """A revision with the same board-meeting date as its original -> the filename's filing time.
+
+    The file content gives only the board-meeting date, which a revision shares with its original;
+    the exchange file name carries the real filing time (_DDMMYYYYhhmmss_). None when it does not
+    apply (not a revision, no timestamp, the original is unknown or has a different date).
+    """
+    if candidate.submission != "revision" or meta.board_meeting_date is None:
+        return None
+    name = (candidate.local_path.name if candidate.local_path else None) or (
+        candidate.download_url or candidate.source_url or ""
+    )
+    stamp = filename_timestamp(name)
+    if stamp is None:
+        return None
+    if _original_board_date(candidate, engine) != meta.board_meeting_date.isoformat():
+        return None
+    return stamp.isoformat(timespec="seconds")
+
+
 def _xbrl_checks(
-    candidate: FilingCandidate, data: bytes
+    candidate: FilingCandidate, data: bytes, engine: Engine | None = None
 ) -> tuple[FilingCandidate, str | None, list[Conflict]]:
     """XBRL bytes -> (candidate with filed_on, taxonomy family, conflicts).
 
-    The source's own filing time wins; otherwise `filed_on` is the board-meeting date in the file.
+    The source's own filing time wins, then a revision's filename timestamp (when it shares the
+    original's board-meeting date); otherwise `filed_on` is the board-meeting date in the file.
     """
     meta = parse_xbrl_meta(data)
-    filed_on = candidate.filed_on or (
-        meta.board_meeting_date.isoformat() if meta.board_meeting_date else None
+    filed_on = (
+        candidate.filed_on
+        or revision_filed_on(candidate, meta, engine)
+        or (meta.board_meeting_date.isoformat() if meta.board_meeting_date else None)
     )
     return (
         replace(candidate, filed_on=filed_on),
@@ -150,7 +197,7 @@ def process_candidate(
         conflicts: list[Conflict] = []
         family: str | None = None
         if candidate.format is FilingFormat.XBRL:
-            candidate, family, conflicts = _xbrl_checks(candidate, data)
+            candidate, family, conflicts = _xbrl_checks(candidate, data, engine)
         elif candidate.filing_type == FILING_TYPE_TRANSCRIPT:
             check = check_transcript(data, settings)
             if check.is_link_only:

@@ -20,7 +20,8 @@ FILING_TYPE_RESULTS = "financial_results"
 FILING_TYPE_ANNUAL = "annual_report"
 FILING_TYPE_TRANSCRIPT = "earnings_call_transcript"
 _SEPARATOR = "__"
-_REVISION_RE = re.compile(r"^rev(?P<n>\d+)$", re.IGNORECASE)
+# `rev1`, optionally followed by the exchange's _DDMMYYYYhhmmss_ filing time (see filename_time)
+_REVISION_RE = re.compile(r"^rev(?P<n>\d+)(?:_\d{14}_)?$", re.IGNORECASE)
 _BASES = {Basis.CONSOLIDATED.value: Basis.CONSOLIDATED, Basis.STANDALONE.value: Basis.STANDALONE}
 _FORMAT_BY_SUFFIX = {".xml": FilingFormat.XBRL, ".pdf": FilingFormat.PDF}
 

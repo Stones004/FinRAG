@@ -71,9 +71,9 @@ def test_review_commands(kit, taxonomy_file, taxonomy, writer) -> None:
     assert again.exit_code == 2 and "already resolved" in again.output
 
 
-def test_run_command_says_why_it_cannot_run_without_m05(kit, taxonomy_file) -> None:
+def test_run_command_with_nothing_parsed_is_a_noop(kit, taxonomy_file) -> None:
     result = runner.invoke(app, ["normalize", "run"])
-    assert result.exit_code == 2 and "fact store (M05" in result.output
+    assert result.exit_code == 0 and "nothing to normalize" in result.output
 
 
 def test_report_for_unknown_isin_fails_cleanly(kit, taxonomy_file) -> None:

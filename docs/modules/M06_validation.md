@@ -15,7 +15,7 @@ version: 1
 rules:
   - id: bs_balances
     description: Total assets equal total equity and liabilities
-    type: equality                       # equality | sum | sign | cross_statement | range
+    type: equality                       # equality | sum | sign | cross_statement | range | cross_source
     left: total_assets
     right: total_equity_and_liabilities
     period_kind: instant
@@ -78,3 +78,6 @@ Tolerances come from `settings.validation` (both relative and absolute must be e
 
 ## Out of scope
 Fraud/shenanigans signals (deferred). This module checks consistency, not quality of earnings.
+
+### `cross_source` rule type (decided at M05 review)
+M05 stores XBRL and PDF/OCR facts for the same key and only applies precedence in the current view; it never compares them. M06 owns that check: a `cross_source` rule reads every stored version of a key (`facts.current_view.history`), compares the XBRL value with each PDF/OCR value and, beyond `validation.relative_tolerance` and `validation.absolute_tolerance_inr` (per-share and ratio concepts: relative only), returns `warn` with both values and filings. It is a finding, never a restatement. Real case: Netweb Q4 FY26 (XBRL revision vs the scanned results PDF; 46 shared keys, differences are rounding of millions to two decimals).

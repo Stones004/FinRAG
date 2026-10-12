@@ -51,6 +51,7 @@ class FilingContext:
     sector: str
     basis: str | None
     filed_on: str | None
+    revision_no: int = 0
 
 
 @dataclass(frozen=True)
@@ -238,6 +239,7 @@ def _normalize_mapped(
         ocr_backend=fact.ocr_backend,
         confidence=fact.confidence,
         filed_on=ctx.filed_on,
+        revision_no=ctx.revision_no,
     )
     if (
         fact.extractor != EXTRACTOR_XBRL
@@ -386,7 +388,13 @@ def _context(filing: sa.Row, sector: str, taxonomy: Taxonomy) -> FilingContext:
                 f"(known: {', '.join(taxonomy.families)})"
             )
     return FilingContext(
-        filing.filing_id, filing.isin, family, sector, filing.basis, filing.filed_on
+        filing.filing_id,
+        filing.isin,
+        family,
+        sector,
+        filing.basis,
+        filing.filed_on,
+        filing.revision_no or 0,
     )
 
 

@@ -1,4 +1,4 @@
-"""`finrag ingest` commands: run, inbox, list, release, ignore."""
+"""`finrag ingest` commands: run, inbox, list, release, ignore, set-filed-on."""
 
 from __future__ import annotations
 
@@ -126,3 +126,21 @@ def release(filing_id: str, note: Annotated[str, typer.Option()] = "") -> None:
 def ignore(filing_id: str, note: Annotated[str, typer.Option()] = "") -> None:
     """Keep a filing quarantined and mark its review item ignored."""
     _change(filing_id, "ignore", note)
+
+
+@ingest_app.command("set-filed-on")
+def set_filed_on(
+    filing_id: str,
+    filed_on: Annotated[str, typer.Argument(help="YYYY-MM-DD, or a full ISO date-time")],
+    reason: Annotated[str, typer.Option(help="Why the stored date is wrong (required)")],
+) -> None:
+    """Correct a filing's filed_on; the old value, new value and reason are recorded."""
+    from finrag.core.db import init_db
+    from finrag.ingestion import registry
+
+    init_db()
+    try:
+        old, new = registry.set_filed_on(filing_id, filed_on, reason)
+    except registry.RegistryError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"{filing_id}: filed_on {old or '-'} -> {new} ({reason})")

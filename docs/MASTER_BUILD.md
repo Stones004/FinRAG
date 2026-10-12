@@ -186,7 +186,7 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 ### 7.3 Facts
 **parsed_facts** — raw values as extracted: `id INTEGER PK, filing_id FK, concept_raw TEXT, label_raw TEXT, period_start, period_end, basis, value TEXT, unit_raw TEXT, scale INTEGER, decimals INTEGER, source_loc TEXT, dimensions_json TEXT NULL (NULL = entity total; otherwise a JSON list of `{axis, member}` pairs, `typed: true` for typed members), statement_type TEXT NULL (PDF/OCR facts: the statement the page was classified as; NULL for XBRL), extractor TEXT (xbrl|pdf_table|ocr), ocr_backend TEXT NULL (tesseract|chandra; set only when extractor = ocr), confidence REAL`
 
-**canonical_facts** (append-only) — `fact_id TEXT PK, isin, concept TEXT, period_start, period_end, period_type, basis, value TEXT, unit TEXT, source_filing_id FK, parsed_fact_id FK, mapping_method TEXT (standard|label|manual), is_derived INTEGER, derivation_json TEXT, filed_on TEXT, created_at`
+**canonical_facts** (append-only) — `fact_id TEXT PK, isin, concept TEXT, period_start, period_end, period_type, basis, value TEXT, unit TEXT, source_filing_id FK, parsed_fact_id FK, mapping_method TEXT (standard|label|manual), is_derived INTEGER, derivation_json TEXT, filed_on TEXT, created_at, source_class TEXT NOT NULL (xbrl|pdf|ocr|derived)`
 
 **review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only|filing_conflict|inbox_unrecognised|normalization_issue), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
 

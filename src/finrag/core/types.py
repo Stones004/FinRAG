@@ -28,6 +28,15 @@ class FilingFormat(StrEnum):
     PDF = "pdf"
 
 
+class SourceClass(StrEnum):
+    """Where a canonical fact came from (drives source precedence in the fact store)."""
+
+    XBRL = "xbrl"
+    PDF = "pdf"
+    OCR = "ocr"
+    DERIVED = "derived"
+
+
 class FilingStatus(StrEnum):
     FETCHED = "fetched"
     PARSED = "parsed"

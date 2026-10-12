@@ -344,3 +344,41 @@ def release(filing_id: str, note: str = "", engine: Engine | None = None) -> Non
 def ignore(filing_id: str, note: str = "", engine: Engine | None = None) -> None:
     """Keep a filing quarantined for good; its review item is marked ignored."""
     _resolve_conflict(filing_id, "ignored", None, note, engine)
+
+
+def set_filed_on(
+    filing_id: str, filed_on: str, reason: str, engine: Engine | None = None
+) -> tuple[str | None, str]:
+    """Correct a filing's `filed_on` (ISO date or datetime); returns (old, new).
+
+    The change is never silent: the old value, new value and reason are written to a `jobs` row
+    (type `set_filed_on`) and to the log. A reason is required.
+    """
+    from datetime import date, datetime
+
+    from finrag.core.jobs import finish_job, start_job
+    from finrag.core.logging import get_logger
+    from finrag.core.types import JobStatus
+
+    if not reason.strip():
+        raise RegistryError("a reason is required to change filed_on")
+    text = filed_on.strip()
+    try:
+        (datetime if "T" in text or " " in text else date).fromisoformat(text)
+    except ValueError as exc:
+        raise RegistryError(f"'{filed_on}' is not an ISO date or datetime") from exc
+    f = tables.filings
+    with transaction(engine) as conn:
+        row = conn.execute(
+            sa.select(f.c.isin, f.c.filed_on).where(f.c.filing_id == filing_id)
+        ).first()
+        if row is None:
+            raise RegistryError(f"unknown filing: {filing_id}")
+        conn.execute(sa.update(f).where(f.c.filing_id == filing_id).values(filed_on=text))
+    job_id = start_job("set_filed_on", row.isin, engine)
+    change = {"filing_id": filing_id, "old": row.filed_on, "new": text, "reason": reason.strip()}
+    finish_job(job_id, JobStatus.SUCCEEDED, change, None, engine)
+    get_logger("ingestion").info(
+        "filed_on changed", extra={"event": "set_filed_on", "fields": change}
+    )
+    return row.filed_on, text

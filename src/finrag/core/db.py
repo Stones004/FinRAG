@@ -14,12 +14,16 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.config import get_settings
 from finrag.core.types import utc_now_iso
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
-# Upgrade steps from version N to N+1: plain SQL run once on an existing database (M03: v2, v3).
+# Upgrade steps from version N to N+1: plain SQL run once on an existing database
+# (M03: v2, v3; M05: v4).
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT",),
     2: ("ALTER TABLE parsed_facts ADD COLUMN statement_type TEXT",),
+    # canonical_facts was empty when v4 was cut; the default only satisfies SQLite's rule that an
+    # added NOT NULL column needs one (a fresh database has no default).
+    3: ("ALTER TABLE canonical_facts ADD COLUMN source_class TEXT NOT NULL DEFAULT 'xbrl'",),
 }
 
 metadata = sa.MetaData()
@@ -149,6 +153,7 @@ _table(
     _text("derivation_json"),
     _text("filed_on"),
     _text("created_at"),
+    _text("source_class", nullable=False),  # xbrl|pdf|ocr|derived
     sa.ForeignKeyConstraint(["source_filing_id"], ["filings.filing_id"]),
     sa.ForeignKeyConstraint(["parsed_fact_id"], ["parsed_facts.id"]),
     sa.Index("ix_canonical_facts_lookup", "isin", "concept", "period_end", "basis"),
@@ -330,7 +335,12 @@ def _migrate(conn: Connection, current: int) -> None:
     """Run the upgrade steps from `current` to SCHEMA_VERSION and record the new version."""
     for version in range(current, SCHEMA_VERSION):
         for statement in _MIGRATIONS[version]:
-            conn.execute(sa.text(statement))
+            try:
+                with conn.begin_nested():
+                    conn.execute(sa.text(statement))
+            except sa.exc.OperationalError as exc:
+                if "duplicate column name" not in str(exc):  # create_all already added it
+                    raise
         conn.execute(
             sa.insert(tables.schema_version).values(version=version + 1, applied_at=utc_now_iso())
         )

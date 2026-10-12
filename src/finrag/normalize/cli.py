@@ -41,21 +41,30 @@ def run(
 ) -> None:
     """Normalize `parsed` filings and hand the candidates to the fact store (M05)."""
     from finrag.core.db import init_db
+    from finrag.facts.derivation import derive_isin
+    from finrag.facts.writer import WriteStats, write_candidates
     from finrag.normalize.runner import NormalizeError, run_normalize
     from finrag.normalize.taxonomy import TaxonomyError
 
-    try:
-        from finrag.facts.writer import write_candidates  # type: ignore[import-not-found]
-    except ModuleNotFoundError as exc:
-        raise _fail(
-            "the fact store (M05, finrag.facts.writer) is not built yet; "
-            "use `finrag normalize report` to see the mapping without writing"
-        ) from exc
+    total = WriteStats()
+
+    def writer(candidates):  # type: ignore[no-untyped-def]
+        """Write candidates and remember the stats and ISINs for the derivation step."""
+        stats = write_candidates(candidates)
+        total.merge(stats)
+        return stats
+
     try:
         init_db()
-        reports = run_normalize(write_candidates, filing)
+        reports = run_normalize(writer, filing)
+        derived = WriteStats()
+        for isin in sorted(total.isins):
+            derived.merge(derive_isin(isin))
     except (ConfigError, TaxonomyError, NormalizeError) as exc:
         raise _fail(exc) from exc
+    if total.fact_ids or derived.fact_ids or total.skipped:
+        typer.echo(f"facts written: {json.dumps(total.as_dict(), sort_keys=True)}")
+        typer.echo(f"facts derived: {json.dumps(derived.as_dict(), sort_keys=True)}")
     if not reports:
         typer.echo("nothing to normalize")
     failed = False

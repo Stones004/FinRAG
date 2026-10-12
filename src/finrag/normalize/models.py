@@ -32,6 +32,7 @@ class CanonicalCandidate:
     ocr_backend: str | None
     confidence: float
     filed_on: str | None
+    revision_no: int = 0  # of the source filing; orders a revision after its original
 
     @property
     def key(self) -> tuple[str, date, date, str]:

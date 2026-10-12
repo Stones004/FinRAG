@@ -83,7 +83,7 @@ def test_version_1_database_is_upgraded_in_place() -> None:
     assert {"dimensions_json", "statement_type"} <= columns
     with transaction() as conn:
         version = conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
-        assert version == SCHEMA_VERSION == 3
+        assert version == SCHEMA_VERSION == 4
         row = conn.execute(sa.select(tables.parsed_facts)).one()
     assert (row.filing_id, row.concept_raw, row.value, row.dimensions_json, row.statement_type) == (
         "FIL-x",
@@ -110,7 +110,10 @@ def test_version_2_database_gets_statement_type() -> None:
     columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("parsed_facts")}
     assert "statement_type" in columns
     with transaction() as conn:
-        assert conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar() == 3
+        assert (
+            conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
+            == SCHEMA_VERSION
+        )
         row = conn.execute(sa.select(tables.parsed_facts)).one()
     assert (row.concept_raw, row.value, row.statement_type) == ("a", "1", None)
 
@@ -125,3 +128,31 @@ def test_database_newer_than_the_code_is_refused() -> None:
         )
     with pytest.raises(SchemaVersionError):
         init_db()
+
+
+def test_version_3_database_gets_source_class() -> None:
+    """A v3 canonical_facts table (no source_class) is upgraded in place."""
+    import sqlite3
+
+    from finrag.core.config import get_settings
+
+    init_db()
+    path = get_settings().paths.db
+    get_engine().dispose()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP TABLE canonical_facts")
+        conn.execute(
+            "CREATE TABLE canonical_facts (fact_id TEXT PRIMARY KEY, isin TEXT, concept TEXT, "
+            "period_start TEXT, period_end TEXT NOT NULL, period_type TEXT, basis TEXT, "
+            "value TEXT, unit TEXT, source_filing_id TEXT, parsed_fact_id INTEGER, "
+            "mapping_method TEXT, is_derived INTEGER, derivation_json TEXT, filed_on TEXT, "
+            "created_at TEXT)"
+        )
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version VALUES (3, '2026-10-12T00:00:00+00:00')")
+    from finrag.core.db import reset_engines
+
+    reset_engines()
+    init_db()
+    columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("canonical_facts")}
+    assert "source_class" in columns

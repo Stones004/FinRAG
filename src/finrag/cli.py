@@ -9,6 +9,7 @@ import typer
 from finrag.core.config import ConfigError, Settings, get_settings, masked_settings
 from finrag.core.db import init_db
 from finrag.core.logging import configure_logging, get_logger
+from finrag.facts.cli import facts_app
 from finrag.ingestion.cli import ingest_app
 from finrag.normalize.cli import normalize_app, review_app
 from finrag.parsing.cli import parse_app
@@ -22,6 +23,7 @@ app.add_typer(ingest_app, name="ingest")
 app.add_typer(parse_app, name="parse")
 app.add_typer(normalize_app, name="normalize")
 app.add_typer(review_app, name="review")
+app.add_typer(facts_app, name="facts")
 
 
 def _load_settings() -> Settings:

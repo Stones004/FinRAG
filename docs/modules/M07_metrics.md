@@ -102,3 +102,6 @@ Add `constant:` as an input option for fixed numbers so formulas contain no magi
 
 ## Out of scope
 Shenanigan signals (they will be additional registry entries + a separate signal module later).
+
+## Note from M05 review: bank asset-quality metrics fall back to standalone
+HDFC Bank's consolidated filings tag NPA and CET1 as 0 (not stored, `zero_is_placeholder`); the real values exist only on the **standalone** basis (PROGRESS finding 32). For `bank_gross_npa`, `bank_net_npa`, their ratios and `bank_cet1_ratio` the metric layer must fall back to the standalone fact when the requested basis is consolidated, and the result must say so (basis used, and why) in the metric value's `reason` and in the answer. These concepts are never derived (`derivable: false`), so only reported periods exist.

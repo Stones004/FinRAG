@@ -71,7 +71,7 @@ def outcomes(mapper: Mapper) -> dict[str, tuple[sa.Row, NormalizeOutcome]]:
     assert ENGINE is not None
     with ENGINE.connect() as conn:
         filings = conn.execute(
-            sa.select(tables.filings).where(tables.filings.c.status == "parsed")
+            sa.select(tables.filings).where(tables.filings.c.status.in_(["parsed", "normalized"]))
         ).all()
     result = {}
     for filing in filings:

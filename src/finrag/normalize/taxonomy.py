@@ -50,10 +50,19 @@ class Concept(_Model):
     zero_is_placeholder: bool = False
     # False: a stock or ratio that M05 must never derive by subtracting cumulative periods
     derivable: bool = True
+    # per-share and ratio concepts are never derived unless the taxonomy says they add up
+    additive: bool = False
     sectors: list[SectorType] | None = None  # None = every sector
     xbrl_concepts: dict[str, list[str]] = {}  # taxonomy family -> QNames
     labels: list[str] = []
     opening_concept: str | None = None  # instant before the cash-flow period start -> this concept
+
+    @property
+    def can_derive(self) -> bool:
+        """True for a duration concept M05 may derive by subtracting cumulative periods."""
+        if self.period_kind != "duration" or not self.derivable:
+            return False
+        return self.unit == "INR" or self.additive
 
     @field_validator("xbrl_concepts")
     @classmethod

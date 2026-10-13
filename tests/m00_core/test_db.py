@@ -83,7 +83,7 @@ def test_version_1_database_is_upgraded_in_place() -> None:
     assert {"dimensions_json", "statement_type"} <= columns
     with transaction() as conn:
         version = conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
-        assert version == SCHEMA_VERSION == 4
+        assert version == SCHEMA_VERSION == 5
         row = conn.execute(sa.select(tables.parsed_facts)).one()
     assert (row.filing_id, row.concept_raw, row.value, row.dimensions_json, row.statement_type) == (
         "FIL-x",
@@ -156,3 +156,33 @@ def test_version_3_database_gets_source_class() -> None:
     init_db()
     columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("canonical_facts")}
     assert "source_class" in columns
+
+
+def test_version_4_database_gets_metric_details() -> None:
+    """A v4 metric_values table (no details_json) is upgraded in place; its rows are untouched."""
+    import sqlite3
+
+    from finrag.core.config import get_settings
+    from finrag.core.db import reset_engines
+
+    init_db()
+    path = get_settings().paths.db
+    get_engine().dispose()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP TABLE metric_values")
+        conn.execute(
+            "CREATE TABLE metric_values (metric_value_id TEXT PRIMARY KEY, isin TEXT, "
+            "metric_id TEXT, formula_version TEXT, period_start TEXT, period_end TEXT, "
+            "period_type TEXT, basis TEXT, value TEXT, status TEXT, reason TEXT, "
+            "input_fact_ids_json TEXT, run_id TEXT, created_at TEXT)"
+        )
+        conn.execute("INSERT INTO metric_values (metric_value_id, value) VALUES ('MET-1', '0.5')")
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version VALUES (4, '2026-10-13T00:00:00+00:00')")
+    reset_engines()
+    init_db()
+    columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("metric_values")}
+    assert "details_json" in columns
+    with transaction() as conn:
+        row = conn.execute(sa.select(tables.metric_values)).one()
+    assert (row.metric_value_id, row.value, row.details_json) == ("MET-1", "0.5", None)

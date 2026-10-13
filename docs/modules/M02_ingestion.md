@@ -94,5 +94,11 @@ Get filings (XBRL results, results PDFs, annual-report PDFs, earnings call trans
 ## Real-data spike (do once, with the user)
 When the user provides 2–3 real filings per type, record in `PROGRESS.md`: file formats, which statements appear in quarterly vs annual filings, whether standalone/consolidated are separate files, how periods and basis are encoded.
 
+## TODO: half-yearly related-party-transaction filing (future source)
+SEBI requires a half-yearly related-party-transaction disclosure with its own XBRL. It is not fetched as a separate filing in v1. Observed 2026-10-13: related-party blocks (`RelatedPartyTransactionExplanatory`, `NameOfCounterParty`, `TypeOfRelatedPartyTransaction`, ... up to 641 transactions in one filing) already sit in the text facts of some integrated results filings (HDFC Bank standalone Q2 FY26 and Q4 FY25/FY26, Netweb Q4 and H1), so part of this data arrives with the results XBRL today. Whether a separate half-yearly filing exists on NSE, and its listing endpoint, are **unverified**: get a real sample before building an adapter. It is a source for the shenanigans layer, not for v1 narrative search.
+
+## Annual reports (decision 2026-10-13)
+Still fetched, registered and stored raw (`filing_type = annual_report`), unchanged. They are not parsed into narrative chunks or indexed in v1 (M08).
+
 ## Out of scope
 Parsing contents beyond the minimal XBRL metadata helper.

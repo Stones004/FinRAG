@@ -14,16 +14,17 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.config import get_settings
 from finrag.core.types import utc_now_iso
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Upgrade steps from version N to N+1: plain SQL run once on an existing database
-# (M03: v2, v3; M05: v4).
+# (M03: v2, v3; M05: v4; M07: v5).
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT",),
     2: ("ALTER TABLE parsed_facts ADD COLUMN statement_type TEXT",),
     # canonical_facts was empty when v4 was cut; the default only satisfies SQLite's rule that an
     # added NOT NULL column needs one (a fresh database has no default).
     3: ("ALTER TABLE canonical_facts ADD COLUMN source_class TEXT NOT NULL DEFAULT 'xbrl'",),
+    4: ("ALTER TABLE metric_values ADD COLUMN details_json TEXT",),
 }
 
 metadata = sa.MetaData()
@@ -218,6 +219,8 @@ _table(
     _text("input_fact_ids_json"),
     _text("run_id"),
     _text("created_at"),
+    # machine-readable flags: code, basis_change events, basis fallback, assumed zeros, warnings
+    _text("details_json"),
     sa.Index("ix_metric_values_lookup", "isin", "metric_id", "period_end"),
 )
 

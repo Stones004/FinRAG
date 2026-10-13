@@ -3,23 +3,33 @@
 **Package:** `src/finrag/narrative/` · **Depends on:** M02, M03 · **Tests:** `tests/m08_narrative/`
 
 ## Purpose
-Turn earnings call transcripts, annual reports (and narrative text blocks in results filings) into section-aware, page-cited chunks, and search them with filters + BM25 + embeddings. Every chunk traces back to a filing and page.
+Turn earnings call transcripts, the XBRL text blocks of results filings and the notes/auditor's-report pages of results PDFs into section-aware, cited chunks, and search them with filters + BM25 + embeddings. Every chunk traces back to a filing and a page (or, for an XBRL text block, the concept it came from).
 
-## Source policy
-- **Transcripts** (`earnings_call_transcript`) are the default narrative source for quarterly "why" questions. All transcript pages are indexed.
-- **Annual reports** are sectioned in full, but **only sections listed in `narrative.annual_report_sections_include` are chunked and indexed**. Annual reports are 130–680 pages and mostly irrelevant; the whitelist keeps MD&A, directors' report, auditor report, CARO, notes, related-party and contingent sections (the last four are needed for the later shenanigans work). Skipped pages are never dropped silently: see `SkipSummary`.
-- `unknown` is never whitelisted (unless a user adds it to the list); unknown spans are skipped and listed so patterns can be improved.
-- Results-filing text blocks (`source_type = results`) are not subject to the annual-report whitelist.
+## Source policy (decision 2026-10-13)
+v1 indexes three kinds of source:
+- **Transcripts** (`earnings_call_transcript`, `source_type = transcript`) are the default narrative source for quarterly "why" questions. All transcript pages are indexed.
+- **XBRL text blocks** of results filings (`source_type = results`; no page: `page` is NULL and the citation names the filing and the XBRL concept). Read from `processed/<filing_id>/text_facts.jsonl` (M03). Only these concepts are indexed (names seen in the real filings; a block that is absent in a filing is simply absent):
+  - `in-capmkt:DisclosureOfNotesOnFinancialResultsExplanatoryTextBlock` → section `results_notes` (up to ~5,900 characters in the real files);
+  - `in-capmkt:DisclosureOfNotesOnSegmentsExplanatoryTextBlock` → `segment_notes`;
+  - `in-capmkt:DisclosureOfNotesOnAssetsAndLiabilitiesExplanatoryTextBlock` → `assets_liabilities_notes`;
+  - `in-capmkt:DeclarationOfUnmodifiedOpinionOrStatementOnImpactOfAuditQualification` → `audit_opinion` (a short declaration, e.g. "Unmodified opinion"; kept as one chunk although it is under `min_chunk_tokens`).
+  Text blocks keep the period, basis and revision of their filing, so a revised filing's blocks supersede the original's.
+- **Results PDFs** (quarterly/annual results, `source_type = results`): **only the notes pages and the auditor's / limited-review report pages**, found with the page classifier (M03) and the `narrative_sections.results_notes` / `results_auditor` patterns; the financial statement pages are numbers (M04) and are not indexed as text. Skipped pages are accounted for in the `SkipSummary`.
+- **Annual reports: deferred.** They stay in the raw store (M02 still fetches and registers them) but M08 does not section, chunk or index them (`narrative.index_annual_reports: false`). The design below (sectioning, the `narrative.annual_report_sections_include` whitelist, `SkipSummary`) is kept in this spec marked **deferred, re-enable for the shenanigans layer**; it has no code or tests in v1.
+- **Not searchable in v1, by this decision:** contingent liabilities, key audit matters, the CARO annexure, full accounting policies and MD&A / directors' report. A question that needs them gets no narrative evidence and an explicit "not indexed" warning (M09), never a guess. The trade-off is in PROGRESS ("Narrative sources v1").
+- `unknown` spans are never indexed; they are skipped and listed so patterns can be improved.
 
 ## Inputs
 - `processed/<filing_id>/pages.jsonl` from M03. For transcript PDFs M03 also stores per-line span info (`lines: [{text, bold, font, size}]`) so the font fallback can run without re-opening the PDF.
-- XBRL text blocks from M03 (notes to results).
+- XBRL text blocks from M03: `processed/<filing_id>/text_facts.jsonl` (`{concept, context, period_start, period_end, dimensions, value}`); only entity-total (no dimension) blocks of the concepts listed in the source policy.
 - `config/sections.yaml` → `narrative_sections` and `transcript_markers` (added by this module).
-- `settings.narrative.annual_report_sections_include`, `settings.narrative.log_skipped_sections`.
+- `settings.narrative.index_annual_reports` (false in v1); for the deferred annual-report path `settings.narrative.annual_report_sections_include`; `settings.narrative.log_skipped_sections`.
 
 ### `sections.yaml` additions
 ```yaml
-narrative_sections:
+narrative_sections:   # the annual-report headings are DEFERRED (re-enable for the shenanigans layer); results_notes / results_auditor are used on results PDFs now
+  results_notes:     ["notes to the financial results", "notes:"]      # starting patterns, to be derived from the real results PDFs before use
+  results_auditor:   ["limited review report", "independent auditor's report", "auditor's report"]
   mdna:              ["management discussion and analysis", "management's discussion"]
   directors_report:  ["directors' report", "board's report"]
   auditor_report:    ["independent auditor's report", "auditor's report"]
@@ -63,9 +73,10 @@ Starting patterns only; extend from real transcripts. Regexes are applied to whi
 
 ### `narrative/sectioner.py`
 - **Input:** pages, section patterns, `source_type`.
-- **Process (annual reports):** detect heading lines (line-level: short, matches pattern, often uppercase/title-case); a section runs until the next detected heading; pages before any match → `unknown`. Also use the report's table of contents if detectable (page numbers next to section names) to confirm boundaries. **All sections are detected**, whitelisted or not.
+- **Process (results PDFs, v1):** the pages the M03 page classifier labels as notes or auditor's report (confirmed with the heading patterns above) form the spans `results_notes` and `auditor_report`; every other page is skipped and recorded in the `SkipSummary` (`reason = not_indexed`). The patterns are starting points, not verified; the real results PDF on file is the Netweb Q4 FY26 scan (OCR), so verify against it and against more issuers.
+- **Process (annual reports) — DEFERRED, not built in v1:** detect heading lines (line-level: short, matches pattern, often uppercase/title-case); a section runs until the next detected heading; pages before any match → `unknown`. Also use the report's table of contents if detectable (page numbers next to section names) to confirm boundaries. **All sections are detected**, whitelisted or not.
 - **Output:** `list[SectionSpan(section, start_page, end_page)]`, plus a `SkipSummary` (below) built by `partition()`.
-- **Whitelist:** `partition(spans, include) -> (kept_spans, SkipSummary)`; spans whose `section` is not in `narrative.annual_report_sections_include` go to the summary with `reason = not_whitelisted`. `unknown` spans (not matching any pattern) are skipped by default and listed with `reason = unknown_section` and their page ranges.
+- **Whitelist (DEFERRED with annual reports):** `partition(spans, include) -> (kept_spans, SkipSummary)`; spans whose `section` is not in `narrative.annual_report_sections_include` go to the summary with `reason = not_whitelisted`. `unknown` spans (not matching any pattern) are skipped by default and listed with `reason = unknown_section` and their page ranges.
 - **`SkipSummary`:** per filing, list of `{section, start_page, end_page, reason}` (`reason` ∈ `not_whitelisted` | `unknown_section`) plus totals (pages kept / skipped / total). Written to `processed/<filing_id>/narrative_summary.json` when `narrative.log_skipped_sections` is true and also logged; with it false, skipped pages are still excluded but only the totals are kept. Pages must always be accounted for: kept + skipped = total.
 
 ### `narrative/transcript_sectioner.py`
@@ -88,9 +99,9 @@ Starting patterns only; extend from real transcripts. Regexes are applied to whi
 - **Summary:** the per-filing `narrative_summary.json` also lists unattributed turns, NULL roles, and label-count mismatches, so patterns can be improved.
 
 ### `narrative/chunker.py`
-- **Input:** pages + kept spans (annual reports) or `TranscriptUnit`s (transcripts).
-- **Process:** split text within each section into chunks of `narrative.chunk_tokens` with `chunk_overlap_tokens`, breaking on paragraph/sentence boundaries; never cross a section boundary; drop chunks under `min_chunk_tokens` only if they're page headers/footers (detect repeated lines across pages and strip them first). Each chunk keeps the page where it starts (and end page if it spans). **Transcript QA units are never split mid-unit when they fit in `chunk_tokens`; a longer unit is split on answer-turn boundaries first, and every resulting chunk repeats the question text as a prefix, so a question always stays with its answer.** Only whitelisted spans (annual reports) reach the chunker.
-- **Output:** `chunks` rows: `chunk_id`, filing_id, isin, fiscal_year, section, `source_type` (`annual_report` | `transcript` | `results`), `speaker`/`speaker_role` (transcript chunks only, else NULL; the analyst's `firm` is kept in chunk metadata), page, seq, text, token_count.
+- **Input:** pages + kept spans (results PDFs), XBRL text blocks, or `TranscriptUnit`s (transcripts).
+- **Process:** split text within each section into chunks of `narrative.chunk_tokens` with `chunk_overlap_tokens`, breaking on paragraph/sentence boundaries; never cross a section boundary; drop chunks under `min_chunk_tokens` only if they're page headers/footers (detect repeated lines across pages and strip them first). Each chunk keeps the page where it starts (and end page if it spans). **Transcript QA units are never split mid-unit when they fit in `chunk_tokens`; a longer unit is split on answer-turn boundaries first, and every resulting chunk repeats the question text as a prefix, so a question always stays with its answer.** Only indexed spans reach the chunker. An XBRL text block is chunked on paragraph boundaries within itself; a block or declaration shorter than `min_chunk_tokens` is kept whole.
+- **Output:** `chunks` rows: `chunk_id`, filing_id, isin, fiscal_year, section, `source_type` (`transcript` | `results`; `annual_report` is reserved for the deferred path), `speaker`/`speaker_role` (transcript chunks only, else NULL; the analyst's `firm` is kept in chunk metadata), page (NULL for XBRL text blocks), seq, text, token_count. For an XBRL text block the concept name is kept in chunk metadata so the citation can name it.
 
 ### `narrative/embedder.py`
 - **Process:** load `narrative.embedding_model` locally (sentence-transformers); embed in batches of `embedding_batch_size`; normalise vectors.
@@ -109,21 +120,21 @@ Starting patterns only; extend from real transcripts. Regexes are applied to whi
 - **Rule:** never return a chunk outside the filters, even if the result list is empty.
 
 ### `narrative/runner.py`
-- **Process:** for filings with pages and no chunks: section (transcript sectioner for `earnings_call_transcript`; sectioner + whitelist partition for `annual_report`) → chunk → write `chunks` → write the skip summary → update BM25 and vectors for that ISIN (incremental append).
-- **Commands:** `finrag narrative index [--isin X]`, `finrag narrative search --isin X "query" [--section mdna --fy FY25 --source transcript]`, `finrag narrative skipped --filing FIL-… ` (prints the skip summary).
+- **Process:** for filings with pages and no chunks: section (transcript sectioner for `earnings_call_transcript`; text-block reader for XBRL results filings; page sectioner for results PDFs; **`annual_report` filings are skipped while `index_annual_reports` is false**) → chunk → write `chunks` → write the skip summary → update BM25 and vectors for that ISIN (incremental append).
+- **Commands:** `finrag narrative index [--isin X]`, `finrag narrative search --isin X "query" [--section results_notes --fy FY25 --source transcript]`, `finrag narrative skipped --filing FIL-… ` (prints the skip summary).
 
 ## Tests and acceptance criteria
-1. Synthetic annual-report fixture: sections detected with correct page ranges.
-2. No chunk crosses a section boundary; every chunk has a page.
+1. Synthetic results-PDF fixture (notes pages, auditor's report pages, statement pages): the notes and auditor's-report spans have the right page ranges; statement pages are skipped and listed.
+2. No chunk crosses a section boundary; every PDF/transcript chunk has a page; every XBRL text-block chunk has a NULL page and its concept in the metadata.
 3. Repeated page headers/footers are stripped.
 4. Filter test: a query matching text in company A never returns company B's chunks; FY filter respected.
 5. Keyword test: an exact term (e.g. a product name) is found via BM25 even with a mocked embedder returning random vectors.
 6. Paraphrase test (optional, marked slow): uses the real model on a fixture.
 7. Re-indexing the same filing creates no duplicate chunks.
 8. Retrieval eval: `tests/m08_narrative/retrieval_cases.yaml` (question → expected chunk IDs on fixtures); report recall@k.
-9. **Whitelist:** on the synthetic annual-report fixture (which contains whitelisted sections, non-whitelisted sections such as `corporate_governance` and `risk`, and an unmatched front section), every section is detected with correct page ranges, but `chunks` contains only whitelisted sections.
-10. **Skip summary:** the per-filing summary lists each skipped span with section, page range and `reason = not_whitelisted`; `unknown` spans appear in it with `reason = unknown_section`; kept + skipped pages equal the total page count (nothing silently dropped). With `log_skipped_sections: false` the skipped pages are still not indexed and totals are still recorded.
-11. Changing `annual_report_sections_include` in settings changes which sections are indexed (test via settings override; no section names hardcoded in code).
+9. **XBRL text blocks:** from a synthetic `text_facts.jsonl`, exactly the four listed concepts become chunks (sections `results_notes`, `segment_notes`, `assets_liabilities_notes`, `audit_opinion`); metadata facts (dates, names, flags), dimensioned facts and related-party tables are ignored; the one-line audit declaration is kept despite its size; a revision's blocks supersede the original's for the same period and basis.
+10. **Skip summary:** for a results PDF the per-filing summary lists each skipped span with section, page range and `reason` (`not_indexed` | `unknown_section`); kept + skipped pages equal the total page count (nothing silently dropped). With `log_skipped_sections: false` the skipped pages are still not indexed and totals are still recorded.
+11. **Annual reports are not indexed:** with `index_annual_reports: false`, an `annual_report` filing produces no chunks and no error, stays in the raw store, and `narrative skipped` reports it as `deferred`. (The whitelist tests of the deferred design are written when it is re-enabled.)
 12. **Transcript sections:** on a synthetic transcript fixture, everything before the first `qa_start` match is `prepared_remarks`, the Q&A is `qa`, and text after the closing hand-over is `closing_remarks` (never inside `qa`; indexed and searchable by `sections=["closing_remarks"]`); cover-letter pages and `Page N of M` footers are excluded.
 13. **Q&A integrity:** each question is chunked together with its answer; no chunk contains an answer without its question text; a long answer split across chunks repeats the question prefix.
 14. **Speaker metadata:** transcript chunks carry `speaker` and `speaker_role` (`management` / `analyst` / `moderator`); roles follow the attribution rules, an unresolvable role is stored as NULL and listed in the summary; non-transcript chunks have both NULL.
@@ -131,7 +142,7 @@ Starting patterns only; extend from real transcripts. Regexes are applied to whi
 16. **Real-file checks (golden, `@pytest.mark.golden`, skipped if absent):** on the four inbox transcripts, Q&A starts at the first analyst intro; analyst names/firms extracted from the intros match a hand-checked list (including `Pranav`, `Chi Ho Wong`, `Vatsal Aggarwal` with no firm, and a firm wrapped over two lines); `Moderator` turns get role moderator; the Netweb host (`Seema Nayak`) is moderator in prepared remarks and analyst in the Q4 FY26 Q&A; turns whose label was lost are reported in the summary rather than guessed.
 17a. Font fallback (synthetic PDF fixture with bold labels): a turn whose plain-text label was lost is attributed from the bold span at line start ending in `:`; with no bold span it is reported as unattributed, not guessed. Verification on the real Netweb PDFs is a golden check.
 17. Analyst intro read by a non-moderator (IR adviser) still starts a QA unit; an analyst re-introduced later starts a new unit.
-18. Fixtures for 9–15, 17 are generated by `tests/fixtures/make_*.py` (no real transcript or report committed); the synthetic transcript layout is a test fixture only and not evidence of any real transcript format.
+18. Fixtures for 1, 9–15, 17 are generated by `tests/fixtures/make_*.py` (no real transcript or report committed); the synthetic transcript layout is a test fixture only and not evidence of any real transcript format.
 
 ## Out of scope
 Answer generation (M09).

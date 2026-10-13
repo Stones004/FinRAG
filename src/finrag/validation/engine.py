@@ -27,7 +27,7 @@ from finrag.core.types import JobStatus, Period, PeriodType, ValidationStatus, u
 from finrag.facts.current_view import current_of, load_facts
 from finrag.facts.dependencies import PeriodKey
 from finrag.facts.models import Fact
-from finrag.normalize.taxonomy import load_taxonomy
+from finrag.normalize.taxonomy import Taxonomy, load_taxonomy
 from finrag.validation import checks
 from finrag.validation.cross_source import RESTATED, Cluster, analyse
 from finrag.validation.events import propose_event
@@ -346,14 +346,16 @@ def _instants(period: Period, opening: bool, closing: bool) -> set[date]:
     return found
 
 
-def _scope(concept: str, include_opening: bool) -> tuple[bool, bool]:
+def _scope(
+    concept: str, include_opening: bool, taxonomy: Taxonomy | None = None
+) -> tuple[bool, bool]:
     """Concept -> (looks at the opening date, looks at the closing date) of a duration.
 
     A plain concept is judged at the period end only. An opening balance (`opening_cash`) is
     judged at the day before the start only. `include_opening` (metrics that average opening and
     closing balances) adds the opening date to a plain concept.
     """
-    if concept in load_taxonomy().opening_names:
+    if concept in (taxonomy or load_taxonomy()).opening_names:
         return True, False
     return include_opening, True
 
@@ -388,16 +390,18 @@ def is_blocked(
     rules: Rules | None = None,
     engine: Engine | None = None,
     include_opening: bool = False,
+    taxonomy: Taxonomy | None = None,
 ) -> tuple[bool, list[str]]:
     """(isin, concept, period, basis) -> (blocked, rule ids), from the latest results.
 
     A duration is blocked by instant results at its end date. An opening balance (`opening_cash`)
     is looked up at the day before the period starts instead. Pass `include_opening=True` for a
     metric that averages opening and closing balances, to also see blocks at the opening date.
+    A caller that asks many times passes the loaded `taxonomy` to avoid re-reading it.
     """
     rules = rules or load_rules()
     with transaction(engine) as conn:
-        rows = _latest(conn, isin, basis, period, _scope(concept, include_opening))
+        rows = _latest(conn, isin, basis, period, _scope(concept, include_opening, taxonomy))
     reasons = []
     for row in rows:
         rule = rules.get(row.rule_id)
@@ -413,10 +417,11 @@ def warnings_for(
     basis: str,
     engine: Engine | None = None,
     include_opening: bool = False,
+    taxonomy: Taxonomy | None = None,
 ) -> list[dict[str, Any]]:
     """Warn results that name this concept (to be shown wherever the number is shown)."""
     with transaction(engine) as conn:
-        rows = _latest(conn, isin, basis, period, _scope(concept, include_opening))
+        rows = _latest(conn, isin, basis, period, _scope(concept, include_opening, taxonomy))
     found = []
     for row in rows:
         details = json.loads(row.details_json)

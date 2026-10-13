@@ -1,0 +1,595 @@
+# FinRAG metric registry (M07). Every number the product shows that is derived is defined here.
+#
+# inputs:   alias -> one of  concept: <taxonomy concept> | metric: <metric id> | constant: <number>
+#   offset: {years: -1} | {periods: -1}   read the input at an earlier period (via core/fiscal)
+#   at:     period_end | period_start     read an instant input (balance) for a duration metric;
+#                                          period_start = the balance the day before the period starts
+#   missing: fail | zero                  zero only for items that are legitimately often absent;
+#                                          every assumed zero is recorded with the value
+#   fallback_basis: standalone            consolidated requested and no consolidated fact: read the
+#                                          standalone fact (only for zero_is_placeholder concepts)
+#   zero_is_placeholder_while_nonzero: <concept>
+#                                          a stored 0 is "not reported" while that concept is non-zero
+#                                          in the same period (derived values are then not trusted)
+#   fallback: {concept, only_if_zero_or_absent: [instant concepts]}
+#                                          use another concept when this one is absent
+# formula:  numbers, aliases, + - * /, parentheses, avg(a, b), abs(x), min(a, b), max(a, b).
+# unit:     RATIO | INR | DAYS | TIMES | INR_PER_SHARE
+# display:  percent | percentage_points | crore | days | times | number
+# period_types: Q, H, 9M, FY (durations) or INSTANT (balance-sheet date); sectors: omit = all.
+# preferred_basis: standalone | consolidated  the basis shown first (both are always computed); omit =
+#   the company's default basis. Bank operating metrics prefer standalone: consolidated operating
+#   expenses include the insurance and other subsidiaries (HDFC Bank FY26 cost to income: 38.00 %
+#   standalone, 58.45 % consolidated).
+# Quarterly cash flow generally does not exist (MASTER_BUILD 8.5), so cash-flow metrics are H and FY.
+version: 1
+
+metrics:
+  # ------------------------------------------------------------------ profit and loss
+  operating_profit:
+    version: "1.0"
+    name: Operating profit
+    description: Profit before tax with finance costs added back and other income and exceptional items removed.
+    synonyms: ["operating profit", "ebit", "operating income"]
+    inputs:
+      pbt: { concept: profit_before_tax }
+      fin: { concept: finance_cost }
+      oi: { concept: other_income }
+      exc: { concept: exceptional_items, missing: zero }
+    formula: "pbt + fin - oi - exc"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions:
+      - "Exceptional items keep the sign of the filing (negative = loss), so subtracting them adds a loss back."
+      - "Share of profit of associates and joint ventures is reported after profit before tax: profit before tax - tax + associates + discontinued operations = profit for the period holds for every period on file (validation rule pl_profit_after_tax), so it is not part of this figure. A filer that broke the identity would carry that validation warning."
+    limitations:
+      - "All other income is removed, including interest income."
+      - "Not comparable across a corporate event or an accounting policy change."
+
+  ebitda:
+    version: "1.0"
+    name: EBITDA
+    description: Operating profit plus depreciation and amortisation.
+    synonyms: ["ebitda", "operating profit before depreciation"]
+    inputs:
+      op: { metric: operating_profit }
+      da: { concept: depreciation_amortisation }
+    formula: "op + da"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions:
+      - "Depreciation and amortisation expense as shown on the profit and loss statement."
+    limitations:
+      - "Not comparable across a corporate event or an accounting policy change."
+
+  operating_margin:
+    version: "1.0"
+    name: Operating margin
+    description: Operating profit as a share of revenue.
+    synonyms: ["operating margin", "ebit margin", "operating profit margin", "opm"]
+    inputs:
+      op: { metric: operating_profit }
+      rev: { concept: revenue }
+    formula: "op / rev"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions: ["Operating profit as defined by metric operating_profit."]
+    limitations: ["Not comparable across a corporate event."]
+
+  ebitda_margin:
+    version: "1.0"
+    name: EBITDA margin
+    description: EBITDA as a share of revenue.
+    synonyms: ["ebitda margin"]
+    inputs:
+      ebitda: { metric: ebitda }
+      rev: { concept: revenue }
+    formula: "ebitda / rev"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions: ["EBITDA as defined by metric ebitda."]
+    limitations: ["Not comparable across a corporate event."]
+
+  net_margin:
+    version: "1.0"
+    name: Net margin
+    description: Profit for the period as a share of revenue.
+    synonyms: ["net margin", "net profit margin", "pat margin", "profit margin"]
+    inputs:
+      pat: { concept: profit_after_tax }
+      rev: { concept: revenue }
+    formula: "pat / rev"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions:
+      - "Profit for the period includes the share of profit of associates and joint ventures and the minority share; see associates_share_of_pat."
+    limitations: ["A large associates share (Gabriel Q1 FY27: 39.5 % of profit) lifts this margin above the operating business."]
+
+  revenue_growth_yoy:
+    version: "1.0"
+    name: Revenue growth (year on year)
+    description: Revenue against the same period a year earlier.
+    synonyms: ["revenue growth", "sales growth", "revenue growth yoy", "topline growth"]
+    inputs:
+      rev: { concept: revenue }
+      rev_ly: { concept: revenue, offset: { years: -1 } }
+    formula: "rev / rev_ly - 1"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions: ["Same period type one fiscal year earlier, as currently served by the fact store."]
+    limitations:
+      - "Flagged basis_change when the two periods straddle a recorded accounting policy change or restatement."
+      - "Not computed across a merger or demerger."
+
+  pat_growth_yoy:
+    version: "1.0"
+    name: Profit growth (year on year)
+    description: Change in profit for the period against the same period a year earlier.
+    synonyms: ["profit growth", "pat growth", "net profit growth", "earnings growth"]
+    inputs:
+      pat: { concept: profit_after_tax }
+      pat_ly: { concept: profit_after_tax, offset: { years: -1 } }
+    formula: "(pat - pat_ly) / abs(pat_ly)"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    assumptions:
+      - "The change is divided by the absolute value of last year's profit, so a swing from loss to profit is positive."
+    limitations:
+      - "Unstable when last year's profit is near zero."
+      - "Flagged basis_change when the two periods straddle a recorded accounting policy change or restatement."
+
+  operating_margin_change_yoy:
+    version: "1.0"
+    name: Operating margin change (year on year)
+    description: Operating margin less the operating margin of the same period a year earlier.
+    synonyms: ["operating margin change", "margin expansion", "margin change"]
+    inputs:
+      om: { metric: operating_margin }
+      om_ly: { metric: operating_margin, offset: { years: -1 } }
+    formula: "om - om_ly"
+    unit: RATIO
+    display: percentage_points
+    period_types: [Q, H, 9M, FY]
+    sectors: [general]
+    assumptions: ["Shown in percentage points."]
+    limitations:
+      - "Flagged basis_change when the two periods straddle a recorded accounting policy change or restatement."
+
+  associates_share_of_pat:
+    version: "1.0"
+    name: Associates and joint ventures share of profit
+    description: Share of profit of associates and joint ventures as a share of profit for the period.
+    synonyms: ["associates share of profit", "share of associates", "jv share of profit"]
+    inputs:
+      assoc: { concept: share_of_associates_jv, missing: zero }
+      pat: { concept: profit_after_tax }
+    formula: "assoc / pat"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    assumptions:
+      - "An absent share of associates is taken as zero and recorded as an assumed zero."
+    limitations: ["Unstable when profit for the period is near zero."]
+
+  profit_owners:
+    version: "1.0"
+    name: Profit attributable to owners
+    description: Profit attributable to owners of the parent; total profit when there is no minority interest.
+    inputs:
+      po:
+        concept: profit_attributable_owners
+        zero_is_placeholder_while_nonzero: profit_after_tax
+        fallback: { concept: profit_after_tax, only_if_zero_or_absent: [non_controlling_interest] }
+    formula: "po"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    helper: true
+    assumptions:
+      - "A stored zero for profit attributable to owners is a placeholder (not tagged) while profit for the period is not zero; derived values of it are not used."
+      - "Without the tag, total profit for the period is used only when non-controlling interest is zero or absent at the period end; otherwise the value is not computed."
+
+  # ------------------------------------------------------------------ balance sheet helpers
+  equity_owners:
+    version: "1.0"
+    name: Equity attributable to owners
+    description: Total equity less non-controlling interest.
+    inputs:
+      te: { concept: total_equity }
+      nci: { concept: non_controlling_interest, missing: zero }
+    formula: "te - nci"
+    unit: INR
+    display: crore
+    period_types: [INSTANT]
+    sectors: [general]
+    helper: true
+    assumptions: ["Absent non-controlling interest is taken as zero and recorded as an assumed zero."]
+
+  bank_equity:
+    version: "1.0"
+    name: Bank equity
+    description: Capital plus reserves and surplus (banks tag no total equity).
+    inputs:
+      cap: { concept: bank_share_capital }
+      res: { concept: bank_reserves_and_surplus }
+    formula: "cap + res"
+    unit: INR
+    display: crore
+    period_types: [INSTANT]
+    sectors: [bank]
+    helper: true
+    assumptions: ["A helper metric, not a taxonomy concept."]
+
+  capital_employed:
+    version: "1.0"
+    name: Capital employed
+    description: Total equity plus borrowings plus lease liabilities.
+    inputs:
+      te: { concept: total_equity }
+      ltb: { concept: long_term_borrowings }
+      stb: { concept: short_term_borrowings }
+      ll: { concept: lease_liabilities, missing: zero }
+    formula: "te + ltb + stb + ll"
+    unit: INR
+    display: crore
+    period_types: [INSTANT]
+    sectors: [general]
+    helper: true
+    assumptions:
+      - "Current borrowings include current maturities of long-term debt (the tag is BorrowingsCurrent)."
+    limitations:
+      - "Lease liabilities are not tagged in any filing seen so far (lease_liabilities has no XBRL mapping), so they are taken as zero: capital employed is understated and ROCE overstated for a company with leases."
+
+  # ------------------------------------------------------------------ returns and balance sheet ratios
+  roe:
+    version: "1.0"
+    name: Return on equity
+    description: Profit attributable to owners over the average of opening and closing equity attributable to owners.
+    synonyms: ["roe", "return on equity", "return on net worth"]
+    inputs:
+      po: { metric: profit_owners }
+      eq: { metric: equity_owners, at: period_end }
+      eq_ly: { metric: equity_owners, at: period_end, offset: { years: -1 } }
+    formula: "po / avg(eq, eq_ly)"
+    unit: RATIO
+    display: percent
+    period_types: [FY]
+    sectors: [general]
+    include_opening: true
+    assumptions:
+      - "Opening equity is the closing equity of the previous fiscal year; the first year on file has none, so it is not computed."
+    limitations:
+      - "Average of two balance-sheet dates, not of interim balances."
+      - "Flagged basis_change when opening and closing equity straddle a recorded accounting policy change or restatement."
+
+  roe_bank:
+    version: "1.0"
+    name: Return on equity (bank)
+    description: Profit attributable to owners over the average of opening and closing capital plus reserves.
+    synonyms: ["roe", "return on equity", "return on net worth"]
+    inputs:
+      po: { metric: profit_owners }
+      eq: { metric: bank_equity, at: period_end }
+      eq_ly: { metric: bank_equity, at: period_end, offset: { years: -1 } }
+    formula: "po / avg(eq, eq_ly)"
+    unit: RATIO
+    display: percent
+    period_types: [FY]
+    sectors: [bank]
+    include_opening: true
+    assumptions:
+      - "Equity is capital plus reserves and surplus (metric bank_equity)."
+      - "Profit is the bank's profit after minority interest and share of associates."
+    limitations:
+      - "Average of two balance-sheet dates, not of interim balances."
+
+  roce:
+    version: "1.0"
+    name: Return on capital employed
+    description: Operating profit over the average of opening and closing capital employed.
+    synonyms: ["roce", "return on capital employed"]
+    inputs:
+      op: { metric: operating_profit }
+      ce: { metric: capital_employed, at: period_end }
+      ce_ly: { metric: capital_employed, at: period_end, offset: { years: -1 } }
+    formula: "op / avg(ce, ce_ly)"
+    unit: RATIO
+    display: percent
+    period_types: [FY]
+    sectors: [general]
+    include_opening: true
+    assumptions:
+      - "Operating profit as defined by metric operating_profit (before other income)."
+    limitations:
+      - "Lease liabilities are not tagged in any filing seen so far and are taken as zero, which overstates ROCE for a company with leases."
+      - "Flagged basis_change when opening and closing capital employed straddle a recorded accounting policy change or restatement."
+
+  debt_to_equity:
+    version: "1.0"
+    name: Debt to equity
+    description: Borrowings over equity attributable to owners.
+    synonyms: ["debt to equity", "debt equity ratio", "d/e", "gearing"]
+    inputs:
+      ltb: { concept: long_term_borrowings }
+      stb: { concept: short_term_borrowings }
+      eq: { metric: equity_owners }
+    formula: "(ltb + stb) / eq"
+    unit: TIMES
+    display: times
+    period_types: [INSTANT]
+    sectors: [general]
+    assumptions: ["Borrowings are non-current plus current borrowings; lease liabilities are not included."]
+
+  current_ratio:
+    version: "1.0"
+    name: Current ratio
+    description: Current assets over current liabilities.
+    synonyms: ["current ratio", "liquidity ratio"]
+    inputs:
+      ca: { concept: total_current_assets }
+      cl: { concept: total_current_liabilities }
+    formula: "ca / cl"
+    unit: TIMES
+    display: times
+    period_types: [INSTANT]
+    sectors: [general]
+
+  # ------------------------------------------------------------------ cash flow
+  cfo_to_pat:
+    version: "1.0"
+    name: Cash conversion (operating cash flow to profit)
+    description: Net cash from operating activities over profit for the period.
+    synonyms: ["cfo to pat", "cash conversion", "operating cash flow to profit", "cash flow to profit"]
+    inputs:
+      cfo: { concept: cfo }
+      pat: { concept: profit_after_tax }
+    formula: "cfo / pat"
+    unit: TIMES
+    display: times
+    period_types: [H, FY]
+    sectors: [general]
+    assumptions: ["Cash flow statements are filed half-yearly and annually, so there is no quarterly value."]
+    limitations:
+      - "Unstable when profit is near zero."
+      - "Uses the current version of the cash flow: a restated operating cash flow is flagged with the value."
+
+  fcf:
+    version: "1.0"
+    name: Free cash flow
+    description: Operating cash flow less purchases of property, plant and equipment and intangible assets.
+    synonyms: ["free cash flow", "fcf"]
+    inputs:
+      cfo: { concept: cfo }
+      cx: { concept: capex_ppe }
+      ci: { concept: capex_intangibles, missing: zero }
+    formula: "cfo - cx - ci"
+    unit: INR
+    display: crore
+    period_types: [H, FY]
+    sectors: [general]
+    assumptions:
+      - "The taxonomy holds capital expenditure as a positive outflow."
+      - "Purchases of intangible assets are subtracted too; absent intangibles are taken as zero and recorded."
+    limitations:
+      - "Capital expenditure is as tagged in the cash flow statement; capital work in progress and capital advances may sit inside it."
+      - "Uses the current version of the cash flow: restated inputs are flagged with the value."
+
+  dso:
+    version: "1.0"
+    name: Days sales outstanding
+    description: Closing trade receivables over revenue, in days.
+    synonyms: ["dso", "days sales outstanding", "receivable days", "debtor days"]
+    inputs:
+      rec_c: { concept: trade_receivables_current, at: period_end }
+      rec_nc: { concept: trade_receivables_noncurrent, at: period_end, missing: zero }
+      rev: { concept: revenue }
+      days: { constant: 365 }
+    formula: "(rec_c + rec_nc) / rev * days"
+    unit: DAYS
+    display: days
+    period_types: [FY]
+    sectors: [general]
+    assumptions: ["Receivables are current plus non-current trade receivables at the year end."]
+    limitations:
+      - "Closing receivables, not the average over the year."
+      - "Revenue includes sales not made on credit."
+
+  # ------------------------------------------------------------------ banks
+  nii:
+    version: "1.0"
+    name: Net interest income
+    description: Interest earned less interest expended.
+    synonyms: ["net interest income", "nii"]
+    inputs:
+      ie: { concept: bank_interest_earned }
+      ix: { concept: bank_interest_expended }
+    formula: "ie - ix"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+
+  cost_to_income:
+    version: "1.0"
+    name: Cost to income ratio
+    description: Operating expenses over net interest income plus other income.
+    synonyms: ["cost to income", "cost to income ratio", "efficiency ratio"]
+    inputs:
+      opex: { concept: bank_operating_expenses }
+      nii: { metric: nii }
+      oi: { concept: other_income }
+    formula: "opex / (nii + oi)"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions:
+      - "Net interest income plus other income less operating expenses equals the operating profit before provisions the bank reports (checked on HDFC Bank, both bases)."
+
+  credit_cost:
+    version: "1.0"
+    name: Credit cost
+    description: Provisions over the average of opening and closing advances.
+    synonyms: ["credit cost", "provisioning cost", "provisions to advances"]
+    inputs:
+      prov: { concept: bank_provisions }
+      adv: { concept: bank_advances, at: period_end }
+      adv_ly: { concept: bank_advances, at: period_end, offset: { years: -1 } }
+    formula: "prov / avg(adv, adv_ly)"
+    unit: RATIO
+    display: percent
+    period_types: [FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    include_opening: true
+    assumptions:
+      - "Provisions other than tax and contingencies, as tagged by the bank."
+      - "Opening advances are the advances at the previous fiscal year end."
+    limitations: ["Average of two balance-sheet dates."]
+
+  advances_growth_yoy:
+    version: "1.0"
+    name: Advances growth (year on year)
+    description: Advances against the same balance-sheet date a year earlier.
+    synonyms: ["advances growth", "loan growth", "credit growth"]
+    inputs:
+      adv: { concept: bank_advances }
+      adv_ly: { concept: bank_advances, offset: { years: -1 } }
+    formula: "adv / adv_ly - 1"
+    unit: RATIO
+    display: percent
+    period_types: [INSTANT]
+    sectors: [bank]
+    preferred_basis: standalone
+    limitations: ["Balance sheets are filed half-yearly, so only 31 March and 30 September have a value."]
+
+  deposits_growth_yoy:
+    version: "1.0"
+    name: Deposits growth (year on year)
+    description: Deposits against the same balance-sheet date a year earlier.
+    synonyms: ["deposits growth", "deposit growth"]
+    inputs:
+      dep: { concept: bank_deposits }
+      dep_ly: { concept: bank_deposits, offset: { years: -1 } }
+    formula: "dep / dep_ly - 1"
+    unit: RATIO
+    display: percent
+    period_types: [INSTANT]
+    sectors: [bank]
+    preferred_basis: standalone
+    limitations: ["Balance sheets are filed half-yearly, so only 31 March and 30 September have a value."]
+
+  credit_deposit_ratio:
+    version: "1.0"
+    name: Credit to deposit ratio
+    description: Advances over deposits.
+    synonyms: ["credit deposit ratio", "cd ratio", "credit to deposit ratio", "loan to deposit ratio"]
+    inputs:
+      adv: { concept: bank_advances }
+      dep: { concept: bank_deposits }
+    formula: "adv / dep"
+    unit: RATIO
+    display: percent
+    period_types: [INSTANT]
+    sectors: [bank]
+    preferred_basis: standalone
+
+  # ------------------------------------------------------------------ bank asset quality (reported)
+  # Consolidated filings tag these as 0 (not a disclosure, so not stored); the standalone figure is
+  # used and the value says so. These are reported figures, never derived.
+  gross_npa:
+    version: "1.0"
+    name: Gross NPA
+    description: Gross non-performing assets as reported.
+    synonyms: ["gross npa", "gross non performing assets"]
+    inputs:
+      x: { concept: bank_gross_npa, fallback_basis: standalone }
+    formula: "x"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions: ["Reported by the bank in its standalone results; the consolidated filing tags 0."]
+
+  net_npa:
+    version: "1.0"
+    name: Net NPA
+    description: Net non-performing assets as reported.
+    synonyms: ["net npa", "net non performing assets"]
+    inputs:
+      x: { concept: bank_net_npa, fallback_basis: standalone }
+    formula: "x"
+    unit: INR
+    display: crore
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions: ["Reported by the bank in its standalone results; the consolidated filing tags 0."]
+
+  gross_npa_ratio:
+    version: "1.0"
+    name: Gross NPA ratio
+    description: Gross non-performing assets as a share of gross advances, as reported.
+    synonyms: ["gross npa ratio", "gross npa %", "gnpa", "gross npa percentage", "asset quality"]
+    inputs:
+      x: { concept: bank_gross_npa_ratio, fallback_basis: standalone }
+    formula: "x"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions: ["The reported ratio is used, not a recomputation."]
+    limitations:
+      - "Recomputing from the NPA amount and balance-sheet advances gives 1.16 % for HDFC Bank standalone Q4 FY26 (340,611.9 / 29,371,662.6 mn) against the reported 1.15 %; the reported ratio is used."
+      - "Reported to two decimals of a percent."
+
+  net_npa_ratio:
+    version: "1.0"
+    name: Net NPA ratio
+    description: Net non-performing assets as a share of net advances, as reported.
+    synonyms: ["net npa ratio", "net npa %", "nnpa", "net npa percentage"]
+    inputs:
+      x: { concept: bank_net_npa_ratio, fallback_basis: standalone }
+    formula: "x"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions: ["The reported ratio is used, not a recomputation."]
+    limitations:
+      - "A recomputation from the NPA amount and balance-sheet advances can differ slightly from the reported ratio (see gross_npa_ratio); the reported ratio is used."
+      - "Reported to two decimals of a percent."
+
+  cet1_ratio:
+    version: "1.0"
+    name: CET1 ratio
+    description: Common equity tier 1 capital ratio as reported.
+    synonyms: ["cet1", "cet1 ratio", "common equity tier 1", "capital adequacy"]
+    inputs:
+      x: { concept: bank_cet1_ratio, fallback_basis: standalone }
+    formula: "x"
+    unit: RATIO
+    display: percent
+    period_types: [Q, H, 9M, FY]
+    sectors: [bank]
+    preferred_basis: standalone
+    assumptions: ["Reported by the bank in its standalone results; the consolidated filing tags 0."]
+    limitations: ["Reported to two decimals of a percent."]

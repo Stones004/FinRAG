@@ -18,8 +18,7 @@ The later goal (deferred) is to flag possible financial shenanigans. Everything 
 - Indian companies listed on NSE/BSE, on the user's watch list (grows over time).
 - Ind AS filings, roughly FY2021 onward (3–5 years, configurable).
 - Quarterly/half-yearly/annual financial results (XBRL preferred, PDF fallback).
-- Annual reports (PDF) for narrative: MD&A, Directors' Report, Notes, Auditor's Report (whitelisted sections only — see `narrative.annual_report_sections_include`).
-- Earnings call transcripts (PDF) as the primary narrative source for quarterly "why" questions.
+- Narrative sources (decision 2026-10-13): earnings call transcripts (PDF) as the primary source for quarterly "why" questions; the XBRL text blocks of results filings (notes to the results, audit-opinion declaration, segment notes); and the notes and auditor's-report pages of the quarterly/annual results PDFs. **Annual reports are kept in the raw store but not indexed in v1** (deferred; the whitelist design in M08 is kept for the shenanigans layer).
 - Derived metrics from a declarative registry.
 - Question answering with citations to facts and pages.
 - Periodic refresh, with alerts if access terms allow.
@@ -195,10 +194,10 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 ### 7.4 Validation and metrics
 **validation_results** — `id INTEGER PK, isin, period_end, period_type, basis, rule_id TEXT, status TEXT (pass|warn|block|skip), details_json TEXT, run_id TEXT, created_at`
 
-**metric_values** — `metric_value_id TEXT PK, isin, metric_id TEXT, formula_version TEXT, period_start, period_end, period_type, basis, value TEXT NULL, status TEXT (computed|not_computed), reason TEXT, input_fact_ids_json TEXT, run_id TEXT, created_at`
+**metric_values** — `metric_value_id TEXT PK, isin, metric_id TEXT, formula_version TEXT, period_start, period_end, period_type, basis, value TEXT NULL, status TEXT (computed|not_computed), reason TEXT, input_fact_ids_json TEXT, run_id TEXT, created_at, details_json TEXT` (v5: machine-readable `code`, `basis_change`, `basis_fallback`, `assumed_zero`, `warnings`, `restatements`; `reason` is a short sentence; see M07)
 
 ### 7.5 Narrative
-**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, source_type TEXT (annual_report|transcript|results), speaker TEXT NULL, speaker_role TEXT NULL (management|analyst|moderator), page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at`
+**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, source_type TEXT (transcript|results; annual_report reserved, deferred), speaker TEXT NULL, speaker_role TEXT NULL (management|analyst|moderator), page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at`
 `speaker` and `speaker_role` are set only for transcript chunks. Transcript `section` ∈ {`prepared_remarks`, `qa`, `closing_remarks`}.
 Embeddings and BM25 indexes live under `data/indexes/`, keyed by `chunk_id`.
 
@@ -294,6 +293,7 @@ Use a small ULID helper in `core/ids.py` (time-sortable). In LLM prompts, real I
 ## 12. Deferred work (design hooks only)
 - **Signals engine**: `signals` table exists; metrics registry supports any formula the signals need (DSO, accruals, CFO/NI). No code in v1.
 - **Promoter pledging, shareholding, RPT filings**: new source adapters + taxonomy entries later.
+- **Annual-report narrative** (decision 2026-10-13): fetched and stored raw, not parsed into chunks or indexed in v1. Re-enable (`narrative.index_annual_reports`) for the shenanigans layer, which needs contingent liabilities, key audit matters, CARO, accounting policies and related-party sections. M08 keeps the sectioner/whitelist design for it.
 - **Multi-user**: move SQLite → Postgres; add auth; legal review (SEBI research analyst rules, DPDP Act) before any public release.
 
 ---

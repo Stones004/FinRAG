@@ -264,6 +264,7 @@ class ValidationSettings(ToleranceSettings):
 class MetricsSettings(_Model):
     version_policy: Literal["latest", "pinned"]
     pinned_versions: dict[str, str]
+    decimal_precision: int = Field(ge=10)  # significant digits of every metric calculation
 
 
 class RetrievalSettings(_Model):
@@ -283,6 +284,7 @@ class NarrativeSettings(_Model):
     embedding_device: Literal["cpu", "cuda"]
     embedding_batch_size: int = Field(gt=0)
     vector_backend: Literal["numpy", "faiss"]
+    index_annual_reports: bool
     annual_report_sections_include: list[str]
     log_skipped_sections: bool
     retrieval: RetrievalSettings

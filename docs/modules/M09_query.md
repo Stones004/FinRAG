@@ -36,11 +36,18 @@ period_patterns:          # regex → handler name in period_resolver
 comparison_words:
   yoy:        ["year on year", "yoy", "vs last year", "compared to last year"]
   sequential: ["qoq", "quarter on quarter", "sequential", "vs last quarter"]
-section_hints:            # words that narrow narrative search to sections
-  auditor_report: ["auditor", "audit opinion", "qualified"]
+section_hints:            # words that narrow narrative search to sections (v1 indexes results_notes, segment_notes, audit_opinion, auditor_report and the transcript sections)
+  audit_opinion:  ["audit opinion", "qualified", "unmodified"]
+  auditor_report: ["auditor", "limited review"]
+  segment_notes:  ["segment"]
+  results_notes:  ["notes to the results"]
+  # not indexed in v1 (annual reports deferred): a match sets Plan.unavailable_sources
   related_party:  ["related party"]
   contingent:     ["contingent"]
-  mdna:           ["management", "outlook", "guidance"]
+  mdna:           ["management discussion", "md&a"]
+  key_audit_matters: ["key audit matter"]
+  caro:           ["caro"]
+  accounting_policies: ["accounting policy", "accounting policies"]
 ```
 - `config/prompts/v1/classify.txt` and `config/prompts/v1/explain.txt` — prompt templates (text with `{placeholders}`). Prompt changes = new version folder, never edit in place.
 
@@ -93,12 +100,13 @@ section_hints:            # words that narrow narrative search to sections
 
 ### `query/planner.py`
 - **Input:** `Intent`.
-- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest`s (isin, fiscal years covering the periods, sections from hints or default `[mdna, directors_report, notes]`, query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
+- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest`s (isin, fiscal years covering the periods, sections from hints or default `[results_notes, segment_notes, audit_opinion, auditor_report]` (annual-report sections are not indexed in v1, see M08), query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
 - **Source order by period type** (period components from `core.fiscal.components_of`):
-  - **Quarter (Q):** (1) transcripts for that quarter (`source_types=["transcript"]`); then (2) annual-report whitelisted sections, only to fill the remaining `max_chunks_in_prompt` slots if transcript hits don't fill them (or none exist).
-  - **Half-year / nine-month (H, 9M):** transcripts for **every quarter inside the period** (H1 = Q1 + Q2 calls, 9M = Q1–Q3), not just the latest. Annual-report sections are searched **only if the period ends at the fiscal year-end** (i.e. never for H1 or 9M; an H2 question ends at year-end and does include them).
-  - **Fiscal year (FY):** all four quarterly transcripts plus annual-report whitelisted sections, searched together.
-  - Within a source type, results are ranked by relevance (RRF), not by quarter; each hit keeps the quarter (`period_label`) it came from. Explicit `section_hints` (e.g. auditor) go straight to annual-report sections.
+  - **Quarter (Q):** (1) transcripts for that quarter (`source_types=["transcript"]`); then (2) the results text (`source_types=["results"]`: notes to the results, segment notes, audit-opinion declaration, notes/auditor pages of the results PDF) of that quarter's filing, only to fill the remaining `max_chunks_in_prompt` slots if transcript hits don't fill them (or none exist).
+  - **Half-year / nine-month (H, 9M):** transcripts for **every quarter inside the period** (H1 = Q1 + Q2 calls, 9M = Q1–Q3), not just the latest; the results text of the filings that cover the period fills remaining slots.
+  - **Fiscal year (FY):** all four quarterly transcripts, then the results text of the Q4/annual filing.
+  - **Annual reports are not searched in v1** (deferred, M08): the planner never builds an annual-report `SearchRequest`. A question that needs contingent liabilities, key audit matters, CARO, full accounting policies or MD&A (see `section_hints`) gets `Plan.unavailable_sources` naming them, and the answer says that source is not indexed instead of guessing.
+  - Within a source type, results are ranked by relevance (RRF), not by quarter; each hit keeps the quarter (`period_label`) it came from. Explicit `section_hints` go straight to the matching results sections.
 - **Output:** `Plan` (logged as JSON, including the source order).
 
 ### `query/retriever.py`
@@ -118,7 +126,7 @@ section_hints:            # words that narrow narrative search to sections
 
 ### `query/postcheck.py`
 - **Process:** split explanation into sentences; for each: must cite ≥1 alias (if `require_citation_per_sentence`); all cited aliases must exist in evidence; if `numeric_check_enabled`, every number in the sentence must match a formatted value of a cited alias — otherwise drop the sentence. Record dropped sentences and reasons.
-- **Output:** final `Answer` with `citations` mapped back to real IDs (fact IDs, metric value IDs, chunk IDs → filing + page) and `warnings`. **Each chunk citation records its `source_type`** (`transcript` | `annual_report` | `results`), the **quarter/period it came from** (`period_label`, e.g. Q1 FY27) and, for transcripts, the speaker, role and firm, so the answer can say e.g. "(earnings call, CFO)" vs "(annual report, MD&A p. 42)".
+- **Output:** final `Answer` with `citations` mapped back to real IDs (fact IDs, metric value IDs, chunk IDs → filing + page) and `warnings`. **Each chunk citation records its `source_type`** (`transcript` | `results`), the **quarter/period it came from** (`period_label`, e.g. Q1 FY27) and, for transcripts, the speaker, role and firm, so the answer can say e.g. "(earnings call, CFO)" vs "(results notes, p. 9) or (results filing, audit-opinion declaration)".
 
 ### `query/service.py`
 - **Does:** `ask(question) -> Answer | Clarification`; writes `query_log` (question, intent, plan, retrieved IDs, prompt version, model, answer, cited IDs, post-check result). `feedback(query_id, correct: bool, note)`.
@@ -137,8 +145,8 @@ section_hints:            # words that narrow narrative search to sections
 8. LLM server down (`ping()` fails or connection refused) → numbers-only answer with a warning, no crash. Mocked HTTP tests also cover: `response_format` rejected → one retry with the schema in the prompt; invalid JSON twice → discarded.
 9. Every `ask` writes one `query_log` row with plan and citations.
 10. Basis default is stated in every answer.
-11. Planner: a quarterly "why" question produces a transcript-first plan with annual-report fallback; an H1 question searches the Q1 and Q2 transcripts and no annual report; a 9M question the Q1–Q3 transcripts and no annual report; an FY question all four quarterly transcripts plus annual-report sections; the plan JSON shows the order and the quarters.
-12. With both transcript and annual-report chunks available for a quarterly question, transcript chunks are ranked into the prompt first; annual-report chunks appear only to fill remaining slots. With no transcripts indexed, the annual-report fallback is used and the answer notes that no transcript was available.
+11. Planner: a quarterly "why" question produces a transcript-first plan with the results text of that quarter as the fill; an H1 question searches the Q1 and Q2 transcripts; a 9M question the Q1–Q3 transcripts; an FY question all four quarterly transcripts; no plan ever contains an annual-report request; the plan JSON shows the order and the quarters.
+12. With both transcript and results-text chunks available for a quarterly question, transcript chunks are ranked into the prompt first; results-text chunks appear only to fill remaining slots. With no transcripts indexed, the results text is used and the answer notes that no transcript was available. A question on contingent liabilities, key audit matters, CARO, accounting policies or MD&A returns `unavailable_sources` and an answer that says the source is not indexed (nothing invented).
 13. Every chunk citation in `Answer.citations` carries `source_type` and the quarter it came from (and speaker/role/firm for transcripts); a multi-quarter answer shows different quarters on different citations.
 
 ## Out of scope

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from finrag.core.config import load_registry
+from finrag.core.config import get_settings, load_registry
 from finrag.core.types import SectorType
 
 DUPLICATE_PREFIX = "duplicate_of:"
@@ -48,6 +49,9 @@ class Concept(_Model):
     pdf_sign: Literal["as_printed", "negate"] = "as_printed"
     # a reported 0 means "not disclosed" (never a real value): such facts are counted, not stored
     zero_is_placeholder: bool = False
+    # a reported 0 is a placeholder only while this concept (same filing, period and basis) is
+    # non-zero; a genuine zero is still kept
+    zero_is_placeholder_while_nonzero: str | None = None
     # False: a stock or ratio that M05 must never derive by subtracting cumulative periods
     derivable: bool = True
     # per-share and ratio concepts are never derived unless the taxonomy says they add up
@@ -155,6 +159,11 @@ def _index(raw: TaxonomyFile) -> tuple[dict, dict, dict, dict, list[str]]:
             if other is not None and other != name:
                 problems.append(f"duplicate label '{key}' is on both '{other}' and '{name}'")
             by_label[key] = name
+        guard = concept.zero_is_placeholder_while_nonzero
+        if guard is not None and (guard not in raw.concepts or guard == name):
+            problems.append(
+                f"concept '{name}': zero_is_placeholder_while_nonzero '{guard}' unknown"
+            )
         if concept.opening_concept and concept.opening_concept not in raw.concepts:
             problems.append(
                 f"concept '{name}': opening_concept '{concept.opening_concept}' unknown"
@@ -231,6 +240,27 @@ def parse_taxonomy(data: dict[str, Any]) -> Taxonomy:
         known,
         known_labels,
     )
+
+
+@lru_cache(maxsize=8)
+def _guards_of(path: str, modified_ns: int) -> dict[str, str]:
+    """(registry file, modification time) -> {concept: guard} of the conditional placeholders."""
+    del path, modified_ns  # only the cache key
+    return {
+        name: concept.zero_is_placeholder_while_nonzero
+        for name, concept in load_taxonomy().concepts.items()
+        if concept.zero_is_placeholder_while_nonzero
+    }
+
+
+def placeholder_guards() -> dict[str, str]:
+    """Concepts whose stored 0 is a placeholder while the guard concept is non-zero.
+
+    Read-time companion of the normalizer rule: facts stored before the rule existed are
+    append-only, so the current view hides them with this table (cached per registry file version).
+    """
+    path = get_settings().paths.taxonomy
+    return _guards_of(str(path), path.stat().st_mtime_ns)
 
 
 def load_taxonomy() -> Taxonomy:

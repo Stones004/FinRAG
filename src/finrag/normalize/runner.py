@@ -261,6 +261,26 @@ def _normalize_mapped(
     return candidate
 
 
+def _drop_guarded_zeros(out: NormalizeOutcome, taxonomy: Taxonomy) -> None:
+    """Drop a 0 of a conditional-placeholder concept while its guard is non-zero in the filing.
+
+    Example: profit attributable to owners tagged 0 next to a non-zero profit for the period is
+    "not tagged", not a disclosure; a 0 next to a zero profit is kept.
+    """
+    values = {c.key: c.value for c in out.candidates}
+    kept = []
+    for cand in out.candidates:
+        guard = taxonomy.concepts[cand.concept].zero_is_placeholder_while_nonzero
+        other = values.get((guard, *cand.key[1:])) if guard else None
+        if cand.value == 0 and other is not None and other != 0:
+            out.placeholder_zero += 1  # counted as a placeholder, not as mapped
+            out.mapped_by_method[cand.mapping_method] -= 1
+            out.mapped_by_statement[taxonomy.concepts[cand.concept].statement] -= 1
+            continue
+        kept.append(cand)
+    out.candidates = kept
+
+
 def _drop_conflicting(out: NormalizeOutcome) -> None:
     """Two candidates with one key: equal values keep the first; different values queue an issue."""
     first: dict[tuple[str, date, date, str], CanonicalCandidate] = {}
@@ -359,6 +379,7 @@ def normalize_facts(
             out.candidates.append(candidate)
             out.mapped_by_method[result.method] += 1
             out.mapped_by_statement[taxonomy.concepts[name].statement] += 1
+    _drop_guarded_zeros(out, taxonomy)
     _drop_conflicting(out)
     _check_duplicates(duplicates, ctx, taxonomy, out)
     return out

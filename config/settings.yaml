@@ -146,6 +146,7 @@ validation:
 metrics:
   version_policy: latest               # latest | pinned
   pinned_versions: {}                  # metric_id: version, used when version_policy = pinned
+  decimal_precision: 28                # significant digits of a metric calculation (Decimal context)
 
 narrative:
   chunk_tokens: 400
@@ -155,6 +156,7 @@ narrative:
   embedding_device: cpu                # cpu | cuda; GPU is reserved for OCR (ingestion) and the LLM (query time)
   embedding_batch_size: 32
   vector_backend: numpy                # numpy | faiss
+  index_annual_reports: false          # deferred (2026-10-13): annual reports stay in the raw store, not indexed; true = re-enable for the shenanigans layer
   annual_report_sections_include: [mdna, directors_report, auditor_report, caro, notes, related_party, contingent]
   log_skipped_sections: true           # record skipped annual-report page ranges in the per-filing summary
   retrieval:

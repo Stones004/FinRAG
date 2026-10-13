@@ -19,6 +19,9 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.db import tables, transaction
 from finrag.core.types import FilingStatus, Period, PeriodType, SourceClass
 from finrag.facts.models import Fact
+from finrag.normalize.taxonomy import placeholder_guards
+
+c_ = tables.canonical_facts
 
 
 def _select() -> sa.Select:
@@ -82,10 +85,54 @@ def load_facts(
     if periods is not None:
         query = query.where(c.c.period_end.in_(sorted({p.end.isoformat() for p in periods})))
     facts = [_to_fact(r) for r in conn.execute(query.order_by(c.c.created_at, c.c.fact_id))]
+    facts = _without_placeholders(conn, isin, facts)
     if periods is not None:
         wanted = {(p.start, p.end) for p in periods}
         facts = [f for f in facts if (f.period.start, f.period.end) in wanted]
     return facts
+
+
+def _without_placeholders(conn: Connection, isin: str, facts: list[Fact]) -> list[Fact]:
+    """Hide stored zeros that the taxonomy calls placeholders, and facts derived from them.
+
+    `zero_is_placeholder_while_nonzero`: a 0 of the concept is "not tagged" while the guard
+    concept (e.g. profit for the period) is non-zero for the same basis and period. The normalizer
+    no longer stores such zeros; ones stored earlier stay in the append-only table and are hidden
+    here, together with any derived fact that used one (it inherited the placeholder). The
+    placeholders are looked up across all periods, so a filtered query (one period) hides a derived
+    fact whose placeholder input lies in another period.
+    """
+    guards = placeholder_guards()
+    if not guards or not any(f.concept in guards for f in facts):
+        return facts
+    query = _select().where(
+        c_.c.isin == isin, c_.c.concept.in_(sorted({*guards, *guards.values()}))
+    )
+    stored = [_to_fact(r) for r in conn.execute(query)]
+    grouped: dict[tuple[str, str], list[Fact]] = {}
+    for g in stored:
+        grouped.setdefault((g.basis, g.concept), []).append(g)
+    current = {
+        (basis, concept, start, end): top
+        for (basis, concept), versions in grouped.items()
+        for (start, end), top in current_of(versions).items()
+    }
+    hidden = set()
+    for f in stored:
+        guard_name = guards.get(f.concept)
+        if guard_name is None or f.is_derived or f.value != 0:
+            continue
+        guard = current.get((f.basis, guard_name, f.period.start, f.period.end))
+        if guard is not None and guard.value != 0:
+            hidden.add(f.fact_id)
+    if not hidden:
+        return facts
+    return [
+        f
+        for f in facts
+        if f.fact_id not in hidden
+        and not (f.is_derived and hidden & set((f.derivation or {}).get("input_fact_ids", [])))
+    ]
 
 
 def best(facts: Iterable[Fact]) -> Fact | None:

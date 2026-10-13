@@ -177,6 +177,7 @@ concepts:
     statement: profit_and_loss
     period_kind: duration
     unit: INR
+    zero_is_placeholder_while_nonzero: profit_after_tax   # tagged 0 beside a non-zero profit = not tagged
     xbrl_concepts:
       indas: ["in-capmkt:ProfitOrLossAttributableToOwnersOfParent"]
       banking: ["in-capmkt:ProfitLossAfterTaxesMinorityInterestAndShareOfProfitLossOfAssociates"]

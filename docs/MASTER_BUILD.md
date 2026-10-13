@@ -178,7 +178,7 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 
 **entity_aliases** — `id INTEGER PK, isin TEXT FK, alias TEXT, alias_type TEXT (symbol|code|name|user|isin|scrip_code), valid_from TEXT, valid_to TEXT`
 
-**corporate_events** — `id INTEGER PK, isin TEXT FK, event_type TEXT (rename|merger|demerger|delisting|basis_change), event_date TEXT, details TEXT, source TEXT`
+**corporate_events** — `id INTEGER PK, isin TEXT FK, event_type TEXT (rename|merger|demerger|delisting|basis_change|accounting_policy_change|comparative_restatement), event_date TEXT, details TEXT, source TEXT`
 
 ### 7.2 Ingestion
 **filings** — `filing_id TEXT PK, isin TEXT FK, source TEXT, filing_type TEXT (financial_results|annual_report|earnings_call_transcript), submission TEXT (original|revision), revision_no INTEGER, taxonomy_family TEXT (indas|banking|other), basis TEXT, period_start TEXT, period_end TEXT, period_type TEXT, filed_on TEXT, source_url TEXT, raw_path TEXT, sha256 TEXT UNIQUE, format TEXT (xbrl|pdf), status TEXT (fetched|parsed|normalized|failed|quarantined), error TEXT, created_at TEXT`
@@ -188,7 +188,7 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 
 **canonical_facts** (append-only) — `fact_id TEXT PK, isin, concept TEXT, period_start, period_end, period_type, basis, value TEXT, unit TEXT, source_filing_id FK, parsed_fact_id FK, mapping_method TEXT (standard|label|manual), is_derived INTEGER, derivation_json TEXT, filed_on TEXT, created_at, source_class TEXT NOT NULL (xbrl|pdf|ocr|derived)`
 
-**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only|filing_conflict|inbox_unrecognised|normalization_issue), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
+**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only|filing_conflict|inbox_unrecognised|normalization_issue|corporate_event_proposal), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
 
 **restatements** — `id INTEGER PK, isin, concept, period_start, period_end, basis, old_fact_id, new_fact_id, abs_diff TEXT, rel_diff TEXT, flagged INTEGER, created_at`
 

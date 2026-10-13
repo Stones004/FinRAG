@@ -149,6 +149,28 @@ concepts:
       indas: ["in-capmkt:ProfitLossForPeriod"]
       banking: ["in-capmkt:ProfitLossForThePeriod"]
     labels: ["Profit for the period / year"]
+  profit_continuing_ops:
+    label: Profit for the period from continuing operations
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:ProfitLossForPeriodFromContinuingOperations"] }
+  profit_discontinued_ops:
+    label: Profit (loss) from discontinued operations after tax
+    description: Signed as reported (a loss is negative).
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts: { indas: ["in-capmkt:ProfitLossFromDiscontinuedOperationsAfterTax"] }
+  share_of_associates_jv:
+    label: Share of profit (loss) of associates and joint ventures
+    description: Equity-method share, added to profit after tax (not part of profit before tax). Signed as reported.
+    statement: profit_and_loss
+    period_kind: duration
+    unit: INR
+    xbrl_concepts:
+      indas: ["in-capmkt:ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod"]
+      banking: ["in-capmkt:ShareOfProfitLossOfAssociates"]
   profit_attributable_owners:
     label: Profit attributable to owners of the parent
     description: Only consolidated filings with minority interests carry it (Gabriel); the banking family uses the profit after minority interest and associates.
@@ -706,12 +728,9 @@ known_unmapped:
     "in-capmkt:IncomeTaxRelatingToItemsThatWillNotBeReclassifiedToProfitOrLoss": "income_statement_item"
     "in-capmkt:NetMovementInRegulatoryDeferralAccountBalancesRelatedToProfitOrLossAndTheRelatedDeferredTaxMovement": "income_statement_item"
     "in-capmkt:ProfitBeforeExceptionalItemsAndTax": "income_statement_item"
-    "in-capmkt:ProfitLossForPeriodFromContinuingOperations": "income_statement_item"
-    "in-capmkt:ProfitLossFromDiscontinuedOperationsAfterTax": "income_statement_item"
     "in-capmkt:ProfitLossFromDiscontinuedOperationsBeforeTax": "income_statement_item"
     "in-capmkt:ProfitOrLossAttributableToNonControllingInterests": "income_statement_item"
     "in-capmkt:ShareOfProfitAndLossFromPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "income_statement_item"
-    "in-capmkt:ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod": "income_statement_item"
     "in-capmkt:TaxExpenseOfDiscontinuedOperations": "income_statement_item"
     "in-capmkt:NumberOfStatementsOfDeviationForTheCurrentQuarter": "metadata"
     "in-capmkt:ReserveExcludingRevaluationReserves": "notes_disclosure"
@@ -805,7 +824,6 @@ known_unmapped:
     "in-capmkt:ProfitLossOfMinorityInterest": "income_statement_item"
     "in-capmkt:RevenueOnInvestments": "income_statement_item"
     "in-capmkt:ShareOfProfitAndLossFromPartnershipFirmOrAssociationOfPersonsOrLimitedLiabilityPartnerships": "income_statement_item"
-    "in-capmkt:ShareOfProfitLossOfAssociates": "income_statement_item"
     "in-capmkt:ReserveExcludingRevaluationReserves": "notes_disclosure"
     "in-capmkt:AdditionalTier1Ratio": "ratio"
     "in-capmkt:PercentageOfShareHeldByGovernmentOfIndia": "ratio"

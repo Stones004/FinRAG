@@ -92,7 +92,13 @@ def list_items(
         typer.echo("no review items")
     for item in items:
         payload = json.loads(item.payload_json)
-        summary = payload.get("key") or payload.get("file_name") or payload.get("filing_id") or ""
+        summary = (
+            payload.get("key")
+            or payload.get("file_name")
+            or payload.get("summary")
+            or payload.get("filing_id")
+            or ""
+        )
         extra = f"  suggestion: {payload['suggestion']}" if payload.get("suggestion") else ""
         typer.echo(
             f"{item.id:>5}  {item.status:<8} {item.item_type:<22} x{item.occurrences:<4} "

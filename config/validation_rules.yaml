@@ -1,0 +1,132 @@
+# FinRAG validation rules (M06). Rule types: equality | sum | sign | cross_statement | range |
+# cross_period | cross_source. Every concept name must be in taxonomy.yaml (checked at load).
+# Tolerances come from settings.validation: a check fails only if BOTH tolerances are exceeded.
+# severity_on_fail: block stops the dependent concepts (blocks_concepts); warn never blocks.
+version: 1
+
+rules:
+  # ---------------------------------------------------------------- balance sheet
+  - id: bs_balances
+    description: Total assets equal total equity and liabilities
+    type: equality
+    left: total_assets
+    right: total_equity_and_liabilities
+    period_kind: instant
+    sectors: [general, nbfc]
+    severity_on_fail: block
+    blocks_concepts: [total_assets, total_equity_and_liabilities, total_equity, total_liabilities]
+  - id: bank_bs_balances
+    description: Bank balance sheet - total assets equal capital and liabilities
+    type: equality
+    left: total_assets              # banking family: Assets
+    right: total_equity_and_liabilities   # banking family: CapitalAndLiabilities
+    period_kind: instant
+    sectors: [bank]
+    severity_on_fail: block
+    blocks_concepts:
+      - total_assets
+      - total_equity_and_liabilities
+      - bank_deposits
+      - bank_advances
+      - bank_borrowings
+      - bank_share_capital
+      - bank_reserves_and_surplus
+
+  # ---------------------------------------------------------------- profit and loss
+  - id: pl_total_income
+    description: Revenue + other income = total income
+    type: sum
+    parts: [revenue, other_income]
+    total: total_income
+    sectors: [general, nbfc]
+    severity_on_fail: warn
+  - id: bank_pl_total_income
+    description: Interest earned + other income = total income
+    type: sum
+    parts: [bank_interest_earned, other_income]
+    total: total_income
+    sectors: [bank]
+    severity_on_fail: warn
+  - id: pl_profit_before_tax
+    description: Total income - total expenses (+ exceptional items, signed as reported) = profit before tax
+    type: sum
+    parts: [total_income]
+    optional_parts: [exceptional_items]
+    minus: [total_expenses]
+    total: profit_before_tax
+    sectors: [general, nbfc]
+    severity_on_fail: warn
+  - id: pl_profit_after_tax
+    description: Profit before tax - tax + share of associates and joint ventures + discontinued operations = profit for the period
+    type: sum
+    parts: [profit_before_tax]
+    optional_parts: [share_of_associates_jv, profit_discontinued_ops]   # absent = the filing tags nothing
+    minus: [tax_expense]
+    total: profit_after_tax
+    severity_on_fail: warn
+  - id: revenue_non_negative
+    description: Revenue is not negative
+    type: sign
+    concept: revenue
+    expected: non_negative
+    sectors: [general, nbfc]
+    severity_on_fail: warn
+  - id: tax_rate_plausible
+    description: Effective tax rate within a plausible range
+    type: range
+    numerator: tax_expense
+    denominator: profit_before_tax
+    min: -0.5
+    max: 0.6
+    severity_on_fail: warn
+
+  # ---------------------------------------------------------------- cash
+  - id: cash_ties_to_bs
+    description: Closing cash in the cash flow equals cash and equivalents on the balance sheet
+    type: cross_statement
+    left: closing_cash
+    right: cash_and_equivalents
+    period_kind: instant_at_period_end
+    sectors: [general, nbfc]
+    severity_on_fail: warn          # real case: Gabriel differs by 15-38 mn (cause unconfirmed)
+  - id: opening_cash_equals_prior_closing
+    description: Opening cash of a period equals the closing cash of the period before it
+    type: cross_period
+    opening: opening_cash
+    closing: closing_cash
+    severity_on_fail: block
+    blocks_concepts: [opening_cash, closing_cash]   # at that date only
+
+  # ---------------------------------------------------------------- XBRL vs PDF/OCR
+  - id: xbrl_vs_pdf
+    description: PDF/OCR values agree with the XBRL values of the same key
+    type: cross_source
+    severity_on_fail: warn
+    # Arithmetic the classifier uses to tell a restated comparative (the PDF still adds up and the
+    # lines shift together) from an OCR error (one line, digit pattern, the sums break).
+    identities:
+      - id: total_income
+        parts: [revenue, other_income]
+        total: total_income
+      - id: profit_before_tax
+        parts: [total_income]
+        optional_parts: [exceptional_items]
+        minus: [total_expenses]
+        total: profit_before_tax
+      - id: profit_after_tax
+        parts: [profit_before_tax]
+        optional_parts: [share_of_associates_jv, profit_discontinued_ops]
+        minus: [tax_expense]
+        total: profit_after_tax
+      - id: total_expenses
+        parts: [cost_of_materials, change_in_inventories, employee_expense, finance_cost,
+                depreciation_amortisation, other_expenses]
+        optional_parts: [purchases_stock_in_trade]
+        total: total_expenses
+      - id: total_equity
+        parts: [equity_share_capital, other_equity]
+        optional_parts: [non_controlling_interest]
+        total: total_equity
+      - id: balance_sheet
+        parts: [total_assets]
+        total: total_equity_and_liabilities

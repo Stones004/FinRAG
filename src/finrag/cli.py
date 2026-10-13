@@ -13,6 +13,7 @@ from finrag.facts.cli import facts_app
 from finrag.ingestion.cli import ingest_app
 from finrag.normalize.cli import normalize_app, review_app
 from finrag.parsing.cli import parse_app
+from finrag.validation.cli import validate_app
 from finrag.watchlist.cli import watchlist_app
 
 app = typer.Typer(help="FinRAG command line.", no_args_is_help=True)
@@ -24,6 +25,7 @@ app.add_typer(parse_app, name="parse")
 app.add_typer(normalize_app, name="normalize")
 app.add_typer(review_app, name="review")
 app.add_typer(facts_app, name="facts")
+app.add_typer(validate_app, name="validate")
 
 
 def _load_settings() -> Settings:

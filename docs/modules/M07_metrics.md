@@ -44,6 +44,7 @@ Formula language: numbers, input aliases, `+ - * /`, parentheses, functions `avg
 | `revenue_growth_yoy` | `rev / rev_ly - 1` | Q,H,9M,FY | `rev_ly` = revenue `offset: {years: -1}` |
 | `pat_growth_yoy` | `pat / abs(pat_ly) - 1` | Q,H,9M,FY | limitation: unstable when last year near zero |
 | `operating_margin_change_yoy` | `om - om_ly` | Q,H,9M,FY | unit RATIO, display as percentage points |
+| `associates_share_of_pat` | `assoc / pat` | Q,H,9M,FY | assoc = `share_of_associates_jv` (`missing: zero`); added from M06 finding 35 (Gabriel Q1 FY27: 39.5 % of PAT, about 0 before) |
 | `equity_owners` (helper) | `te - nci` | INSTANT | nci `missing: zero` |
 | `bank_equity` (helper) | `bank_share_capital + bank_reserves_and_surplus` | INSTANT | banks tag no total equity; this is a helper metric, not a taxonomy concept |
 | `capital_employed` (helper) | `te + ltb + stb + ll` | INSTANT | ll (lease liabilities) `missing: zero` |
@@ -75,10 +76,12 @@ Add `constant:` as an input option for fixed numbers so formulas contain no magi
 - **Process:** for each metric in dependency order and each applicable period:
   1. sector and period-type applicability → else `not_computed: not_applicable`;
   2. resolve inputs via `facts.current_view` (+ offsets) or earlier metric results;
-  3. any input blocked (`validation.engine.is_blocked`) → `not_computed: blocked_by_validation (<rule ids>)`;
+  3. any input blocked (`validation.engine.is_blocked`) → `not_computed: blocked_by_validation (<rule ids>)`; pass `include_opening=True` for inputs of metrics that average opening and closing balances (`roe`, `roce`), otherwise a balance is judged at the period end only and an opening balance (`opening_cash`) at the day before the period starts;
   4. missing input (and `missing: fail`) → `not_computed: missing_input (<names>)`;
   5. a `corporate_events` merger/demerger between the input periods → `not_computed: corporate_event_break`;
-  6. evaluate → `computed`.
+  6. evaluate → `computed`;
+  7. **basis change (decided at M06 review):** if the metric's input periods straddle a recorded `accounting_policy_change` or `comparative_restatement` event for the company (some input period ends before the event date and another ends on or after it), the value is still `computed` but flagged `basis_change`: `metric_values.reason` is `basis_change:<event_id>[,<event_id>]` and `MetricValue` carries the events. The answer (M09) and the UI (M11) must show the event(s) next to the number (type, date, citation from `corporate_events.details`). Applies to every YoY or multi-period metric, including those using `offset`. Comparisons must never mix bases silently. M06 does not override M05's values: periods before the event are served as filed (the old basis);
+  8. **validation warnings:** `warn` results (M06 `warnings_for`) on any input concept and period are attached to the value and shown wherever the number is shown. Warnings never block.
   Write `metric_values` with `formula_version`, `input_fact_ids_json`, `run_id`.
 - **Output:** `MetricRunReport` (computed / not_computed by reason).
 
@@ -99,6 +102,8 @@ Add `constant:` as an input option for fixed numbers so formulas contain no magi
 7. Changing a formula version → new rows with the new version; old rows unchanged.
 8. Adding a new metric to YAML (in a temp config) computes with no code change.
 9. Decimal precision: results identical across runs.
+10. A YoY metric whose periods straddle a recorded `accounting_policy_change` (or `comparative_restatement`) is `computed` with `reason = basis_change:<event id>`; a metric with both periods on the same side of the event is not flagged; a merger/demerger still gives `not_computed`.
+11. A `warn` result on an input concept is returned with the value and does not change `status`.
 
 ## Out of scope
 Shenanigan signals (they will be additional registry entries + a separate signal module later).

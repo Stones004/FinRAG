@@ -251,6 +251,16 @@ class ToleranceSettings(_Model):
     absolute_tolerance_inr: int = Field(ge=0)
 
 
+class CrossSourceSettings(_Model):
+    rounding_inr: int = Field(ge=0)
+    min_shifted_keys: int = Field(gt=0)
+    decimal_shift_max_power: int = Field(gt=0)
+
+
+class ValidationSettings(ToleranceSettings):
+    cross_source: CrossSourceSettings
+
+
 class MetricsSettings(_Model):
     version_policy: Literal["latest", "pinned"]
     pinned_versions: dict[str, str]
@@ -379,7 +389,7 @@ class Settings(_Model):
     parsing: ParsingSettings
     normalize: NormalizeSettings
     restatement: ToleranceSettings
-    validation: ToleranceSettings
+    validation: ValidationSettings
     metrics: MetricsSettings
     narrative: NarrativeSettings
     query: QuerySettings

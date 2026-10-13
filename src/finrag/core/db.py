@@ -79,7 +79,8 @@ _table(
     "corporate_events",
     _id_pk(),
     _text("isin", nullable=False),
-    _text("event_type"),  # rename|merger|demerger|delisting|basis_change
+    # rename|merger|demerger|delisting|basis_change|accounting_policy_change|comparative_restatement
+    _text("event_type"),
     _text("event_date"),
     _text("details"),
     _text("source"),
@@ -162,7 +163,7 @@ _table(
     "review_queue",
     _id_pk(),
     # unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only
-    # |filing_conflict|inbox_unrecognised|normalization_issue
+    # |filing_conflict|inbox_unrecognised|normalization_issue|corporate_event_proposal
     _text("item_type"),
     _text("payload_json"),
     _int("occurrences"),

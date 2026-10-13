@@ -136,8 +136,12 @@ restatement:
   absolute_tolerance_inr: 10000000     # ₹1 crore; flag only if BOTH are exceeded
 
 validation:
-  relative_tolerance: 0.001
-  absolute_tolerance_inr: 10000000
+  relative_tolerance: 0.001            # a check fails only if BOTH tolerances are exceeded
+  absolute_tolerance_inr: 10000000     # INR concepts only
+  cross_source:                        # XBRL vs PDF/OCR comparison and its classifier (M06)
+    rounding_inr: 10000                # a difference up to this is rounding of the printed figure (millions to 2 decimals)
+    min_shifted_keys: 3                # at least this many differing lines make a consistent shift, not a one-cell slip
+    decimal_shift_max_power: 3         # PDF/OCR value = XBRL value x 10^k (k = 1..this) reads as a dropped/added decimal point
 
 metrics:
   version_policy: latest               # latest | pinned

@@ -64,6 +64,19 @@ class SectorType(StrEnum):
     INSURANCE = "insurance"
 
 
+class EventType(StrEnum):
+    """corporate_events.event_type."""
+
+    RENAME = "rename"
+    MERGER = "merger"
+    DEMERGER = "demerger"
+    DELISTING = "delisting"
+    BASIS_CHANGE = "basis_change"
+    # M06: periods before the event are on the old accounting basis (see M07 `basis_change`)
+    ACCOUNTING_POLICY_CHANGE = "accounting_policy_change"
+    COMPARATIVE_RESTATEMENT = "comparative_restatement"
+
+
 class AliasType(StrEnum):
     SYMBOL = "symbol"
     CODE = "code"

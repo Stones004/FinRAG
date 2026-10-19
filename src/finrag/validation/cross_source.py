@@ -14,7 +14,6 @@ together with the other differing keys of the same PDF filing and period end:
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -22,7 +21,8 @@ from typing import Any
 
 from finrag.core.config import Settings
 from finrag.core.types import Period, SourceClass
-from finrag.facts.current_view import best
+from finrag.facts.basis_check import beyond_rounding as _beyond_rounding
+from finrag.facts.basis_check import by_key as _by_key
 from finrag.facts.models import Fact
 from finrag.validation.checks import UNIT_INR, gap
 from finrag.validation.rules import Identity
@@ -181,23 +181,6 @@ def _signals(xbrl: Fact, other: Fact, settings: Settings) -> tuple[str, ...]:
 
 
 # --- comparison --------------------------------------------------------------------------------
-
-
-def _beyond_rounding(xbrl: Fact, other: Fact, settings: Settings) -> bool:
-    """True if two values differ by more than the PDF's own rounding."""
-    diff = abs(other.value - xbrl.value)
-    if xbrl.unit == UNIT_INR:
-        return diff > Decimal(settings.validation.cross_source.rounding_inr)
-    larger = max(abs(xbrl.value), abs(other.value))
-    return larger != 0 and diff / larger > Decimal(str(settings.validation.relative_tolerance))
-
-
-def _by_key(facts: Iterable[Fact]) -> dict[tuple[str, date, date], Fact]:
-    """Versions -> the current one per (concept, start, end)."""
-    groups: dict[tuple[str, date, date], list[Fact]] = defaultdict(list)
-    for fact in facts:
-        groups[(fact.concept, fact.period.start, fact.period.end)].append(fact)
-    return {key: top for key, versions in groups.items() if (top := best(versions))}
 
 
 def _holds(

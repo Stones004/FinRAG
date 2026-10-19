@@ -130,3 +130,9 @@ rules:
       - id: balance_sheet
         parts: [total_assets]
         total: total_equity_and_liabilities
+
+# M05 gap-fill gate (owned by facts/gap_gate.py). A PDF/OCR value may fill a gap (be the current
+# value where no XBRL exists) only if its own column passes these identities, named from the
+# cross_source rule above, and its confidence is at least parsing.pdf.min_table_confidence.
+gap_fill_gate:
+  identities: [total_income, profit_after_tax, balance_sheet]

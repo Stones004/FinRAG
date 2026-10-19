@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
@@ -67,11 +68,115 @@ def proposal_payload(isin: str, cluster: Cluster, rule_id: str) -> dict[str, Any
     }
 
 
-def propose_event(conn: Connection, isin: str, cluster: Cluster, rule_id: str) -> int | None:
-    """Queue a proposal for a restated cluster; None if one was already decided (not re-queued)."""
+def _same_values(event_details: dict[str, Any], cluster: Cluster, rounding: int) -> bool:
+    """True if every differing key of the cluster is a key of the event with the same PDF value.
+
+    An event without a list of affected keys is matched on basis and restated period alone.
+    """
+    keys = event_details.get("affected_keys")
+    if not keys:
+        return True
+    known = {(k["concept"], k["period_start"], k["period_end"]): Decimal(k["pdf"]) for k in keys}
+    for d in cluster.differences:
+        value = known.get((d.concept, d.period.start.isoformat(), d.period.end.isoformat()))
+        if value is None or abs(value - d.other.value) > rounding:
+            return False
+    return True
+
+
+def explaining_event(
+    conn: Connection, isin: str, cluster: Cluster, rounding: int = 10_000
+) -> sa.Row | None:
+    """A recorded event that already explains this restated cluster, or None.
+
+    Same company, same basis, the event's restated period end is the cluster's, and the PDF
+    values of the cluster are the values the event recorded (the same restatement shown again by
+    another filing: Netweb's FY25 comparatives appear in the Q4 FY26 and in the Q2 FY26 results).
+    """
+    events = tables.corporate_events
+    for row in conn.execute(
+        sa.select(events)
+        .where(events.c.isin == isin, events.c.event_type.in_(list(CONFIRMABLE)))
+        .order_by(events.c.id)
+    ):
+        details = json.loads(row.details or "{}")
+        if (
+            details.get("basis") == cluster.basis
+            and details.get("restated_period_end") == cluster.period_end.isoformat()
+            and _same_values(details, cluster, rounding)
+        ):
+            return row
+    return None
+
+
+def link_cluster(conn: Connection, event: sa.Row, cluster: Cluster, rule_id: str) -> None:
+    """Attach a cluster to the event that explains it (the event's details list the filings)."""
+    details = json.loads(event.details or "{}")
+    linked = details.setdefault("linked_filings", [])
+    entry = {
+        "pdf_filing_id": cluster.pdf_filing_id,
+        "period_end": cluster.period_end.isoformat(),
+        "differing_keys": len(cluster.differences),
+        "rule_id": rule_id,
+    }
+    if entry["pdf_filing_id"] == details.get("pdf_filing_id") or entry in linked:
+        return
+    linked.append(entry)
+    conn.execute(
+        sa.update(tables.corporate_events)
+        .where(tables.corporate_events.c.id == event.id)
+        .values(details=json.dumps(details, sort_keys=True))
+    )
+
+
+def link_item(item_id: int, event_id: int, engine: Engine | None = None) -> None:
+    """Close an open proposal as resolved by linking it to a recorded event."""
+    with transaction(engine) as conn:
+        item = conn.execute(
+            sa.select(tables.review_queue).where(tables.review_queue.c.id == item_id)
+        ).first()
+        event = conn.execute(
+            sa.select(tables.corporate_events).where(tables.corporate_events.c.id == event_id)
+        ).first()
+        if item is None or event is None:
+            raise ReviewError(f"no review item {item_id} or no event {event_id}")
+        if item.item_type != ITEM_EVENT_PROPOSAL or item.status != STATUS_OPEN:
+            raise ReviewError(f"item {item_id} is not an open {ITEM_EVENT_PROPOSAL}")
+        payload = json.loads(item.payload_json)
+        if payload["isin"] != event.isin:
+            raise ReviewError(f"item {item_id} and event {event_id} are of different companies")
+        _resolve_linked(conn, item.id, event.id, "linked by hand")
+
+
+def _resolve_linked(conn: Connection, item_id: int, event_id: int, how: str) -> None:
+    """Mark a proposal resolved by an existing event."""
+    conn.execute(
+        sa.update(tables.review_queue)
+        .where(tables.review_queue.c.id == item_id)
+        .values(
+            status=STATUS_RESOLVED,
+            resolution_json=json.dumps({"linked_event": event_id, "how": how}, sort_keys=True),
+            updated_at=utc_now_iso(),
+        )
+    )
+
+
+def propose_event(
+    conn: Connection, isin: str, cluster: Cluster, rule_id: str, rounding: int = 10_000
+) -> int | None:
+    """Queue a proposal for a restated cluster, unless a recorded event already explains it
+    (the cluster is then attached to that event) or one was already decided (not re-queued)."""
     payload = proposal_payload(isin, cluster, rule_id)
     match = _identity_of(payload)
     queue = tables.review_queue
+    event = explaining_event(conn, isin, cluster, rounding)
+    if event is not None:
+        link_cluster(conn, event, cluster, rule_id)
+        for row in conn.execute(sa.select(queue).where(queue.c.item_type == ITEM_EVENT_PROPOSAL)):
+            existing = json.loads(row.payload_json)
+            if row.status == STATUS_OPEN and all(existing.get(k) == v for k, v in match.items()):
+                _resolve_linked(conn, row.id, event.id, "same restatement as the recorded event")
+        return None
     for row in conn.execute(sa.select(queue).where(queue.c.item_type == ITEM_EVENT_PROPOSAL)):
         existing = json.loads(row.payload_json)
         if row.status != STATUS_OPEN and all(existing.get(k) == v for k, v in match.items()):

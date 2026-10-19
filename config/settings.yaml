@@ -119,6 +119,10 @@ parsing:
     min_table_confidence: 0.7          # below this a table goes to review_queue
     unit_inherited_confidence_penalty: 0.05  # taken off a fact whose unit line came from an earlier statement page
     format_outlier_confidence: 0.3     # cap for a number whose decimal places differ from the table's usual (OCR drops points)
+    sum_shift_confidence: 0.3          # cap for a cell that would make a column sum-check hold if it were 100x larger or smaller (an OCR decimal slip the format check cannot see)
+    sum_shift_factor: 100              # the shift tried on each cell of a column identity that fails
+    sum_check_abs_tolerance: 0.05      # a column identity (e.g. profit before tax - tax = profit) holds within this many printed units ...
+    sum_check_rel_tolerance: 0.005     # ... or this share of its total (rounding of the printed figures)
     statement_page_min_score: 2        # keyword hits needed to classify a statement page
     quality_min_token_len: 3           # text-quality score counts alphabetic tokens at least this long
     row_tolerance_pt: 4.0              # words this close vertically (points) are one table row
@@ -152,10 +156,11 @@ narrative:
   chunk_tokens: 400
   chunk_overlap_tokens: 60
   min_chunk_tokens: 40
-  embedding_model: BAAI/bge-small-en-v1.5   # [VERIFY] runs locally on your machine
+  embedding_model: BAAI/bge-small-en-v1.5   # one-time download approved 2026-10-19; runs locally; change here to swap models (re-run `narrative index --rebuild`)
   embedding_device: cpu                # cpu | cuda; GPU is reserved for OCR (ingestion) and the LLM (query time)
   embedding_batch_size: 32
-  vector_backend: numpy                # numpy | faiss
+  embedding_query_prefix: "Represent this sentence for searching relevant passages: "   # BGE query instruction; "" for models without one
+  vector_backend: numpy                # numpy only (faiss dropped at the M08 review)
   index_annual_reports: false          # deferred (2026-10-13): annual reports stay in the raw store, not indexed; true = re-enable for the shenanigans layer
   annual_report_sections_include: [mdna, directors_report, auditor_report, caro, notes, related_party, contingent]
   log_skipped_sections: true           # record skipped annual-report page ranges in the per-filing summary

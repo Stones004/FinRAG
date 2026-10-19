@@ -22,7 +22,6 @@ normalize = ["rapidfuzz"]
 ingestion = ["httpx", "lxml", "pymupdf"]
 parsing = ["httpx", "lxml", "pdfplumber", "pillow", "pymupdf", "pytesseract"]
 narrative = ["numpy", "rank_bm25", "rapidfuzz", "sentence-transformers"]
-faiss = ["faiss-cpu"]
 llm = ["httpx"]
 ui = ["pandas", "streamlit"]
 
@@ -35,7 +34,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib --strict-markers"
-markers = ["golden: uses real filings under tests/golden (skipped when empty)"]
+markers = [
+    "golden: uses real filings under tests/golden (skipped when empty)",
+    "slow: loads the real embedding model from the local cache (skipped if not cached)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -36,6 +36,8 @@ class Fact:
     filed_on: str | None  # the source filing's current filed_on
     revision_no: int
     confidence: float | None  # of the parsed fact (None for derived facts)
+    gap_rejected: bool = False  # refused by the gap-fill gate: stored, never current
+    gap_reason: str | None = None
 
     @property
     def key(self) -> tuple[str, str, date, date, str]:

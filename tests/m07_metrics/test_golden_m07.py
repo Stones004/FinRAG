@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-from finrag.core.db import _make_engine, init_db, tables
+from finrag.core.db import _make_engine, init_db, tables, transaction
 from finrag.core.types import MetricStatus, Period, PeriodType
-from finrag.facts.current_view import get_fact, get_facts
+from finrag.facts.current_view import get_fact, get_facts, load_facts
 from finrag.metrics.engine import run_metrics
 from finrag.metrics.query import get_metric
 
@@ -220,6 +220,42 @@ def test_gabriel_associates_share_of_pat(eng) -> None:
         for v in [get_metric(GABRIEL, "associates_share_of_pat", f.period, CONS, eng)]
     ]
     assert earlier and all(v.value == 0 for v in earlier)
+
+
+# --- a bad OCR column is rejected, not used ------------------------------------------------------
+
+
+def test_netweb_q1_fy26_ocr_column_with_profit_100x_off_is_rejected(eng) -> None:
+    """Q2 FY26 results scan, quarter to 30 Jun 2025: profit read as 30,479 (it is 304.79).
+
+    Profit before tax 416.06 less tax 111.27 is 304.79. No XBRL exists for Q1 FY26 (there is no
+    Q1 FY26 filing), so before the gate the 30,479 mn was the current profit. The whole column is
+    rejected: it stays stored, but the current view and the metrics hold nothing for it.
+    """
+    period = q(date(2025, 4, 1), date(2025, 6, 30))
+    assert get_fact(NETWEB, "profit_after_tax", period, STAND, engine=eng) is None
+    assert get_fact(NETWEB, "profit_before_tax", period, STAND, engine=eng) is None  # same column
+    with transaction(eng) as conn:
+        stored = {
+            f.concept: f
+            for f in load_facts(conn, NETWEB, None, STAND, [period], include_rejected=True)
+        }
+    pat = stored["profit_after_tax"]
+    assert pat.value == D("30479000000") and pat.gap_rejected and pat.confidence <= 0.3
+    assert stored["profit_before_tax"].value - stored["tax_expense"].value == D("304790000.00")
+    assert all(f.gap_rejected for f in stored.values())
+    # the metric layer finds nothing to compute from: no row, or an explicit "not computed"
+    margin = get_metric(NETWEB, "net_margin", period, STAND, eng)
+    assert margin is None or margin.status is MetricStatus.NOT_COMPUTED
+    # the half year of the same PDF is XBRL-covered (Q2 FY26 filing) and untouched
+    h1 = get_fact(
+        NETWEB,
+        "profit_after_tax",
+        Period(date(2025, 4, 1), date(2025, 9, 30), PeriodType.H),
+        STAND,
+        engine=eng,
+    )
+    assert h1 is not None and h1.value == D("619120000") and h1.source_class.value == "xbrl"
 
 
 # --- operating profit and associates, per company -------------------------------------------------

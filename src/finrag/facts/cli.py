@@ -1,4 +1,4 @@
-"""`finrag facts` commands: show, restatements, derive."""
+"""`finrag facts` commands: show, restatements, derive, gate."""
 
 from __future__ import annotations
 
@@ -99,3 +99,37 @@ def derive(isin: Annotated[str, typer.Option(help="ISIN or NSE symbol")]) -> Non
     except ConfigError as exc:
         raise _fail(exc) from exc
     typer.echo(", ".join(f"{k} {v}" for k, v in stats.as_dict().items()))
+
+
+@facts_app.command("gate")
+def gate(
+    isin: Annotated[
+        str | None, typer.Option(help="ISIN or NSE symbol; default: all tracked")
+    ] = None,
+    dry_run: Annotated[bool, typer.Option(help="Show the decisions; write nothing")] = False,
+) -> None:
+    """Judge every PDF/OCR column (confidence, column identities); record what may not fill gaps."""
+    from finrag.core.db import init_db
+    from finrag.facts.gap_gate import run_gate
+    from finrag.ingestion.registry import DbEntityLookup
+
+    try:
+        init_db()
+        codes = [_isin(isin)] if isin else DbEntityLookup().tracked_isins()
+        for code in codes:
+            report = run_gate(code, dry_run=dry_run)
+            typer.echo(f"{code}: {report.as_dict()}")
+            for col in report.decisions:
+                if not col.rejected:
+                    continue
+                failed = ",".join(i["id"] for i in col.identities if i["status"] == "block")
+                reasons = sorted({r for f in col.rejected for r in f.reasons})
+                fills = sum(f.would_fill for f in col.rejected)
+                typer.echo(
+                    f"  {col.filing_id} {col.statement_type:<16} {col.basis:<12} "
+                    f"{col.period_start}..{col.period_end}  rejected {len(col.rejected)}/"
+                    f"{len(col.facts)} ({fills} would fill a gap)  identities failed: "
+                    f"{failed or '-'}  reasons: {','.join(reasons)}"
+                )
+    except ConfigError as exc:
+        raise _fail(exc) from exc

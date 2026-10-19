@@ -50,6 +50,8 @@ class ValidationStatus(StrEnum):
     WARN = "warn"
     BLOCK = "block"
     SKIP = "skip"
+    # M05 gap-fill gate: a PDF/OCR column (or value) that may not fill a gap; see facts/gap_gate.py
+    GAP_FILL_REJECTED = "gap_fill_rejected"
 
 
 class MetricStatus(StrEnum):

@@ -41,6 +41,7 @@ section_hints:            # words that narrow narrative search to sections (v1 i
   auditor_report: ["auditor", "limited review"]
   segment_notes:  ["segment"]
   results_notes:  ["notes to the results"]
+  press_release:  ["asset quality", "npa", "press release", "deposits", "advances"]   # HDFC's news release is indexed as press_release
   # not indexed in v1 (annual reports deferred): a match sets Plan.unavailable_sources
   related_party:  ["related party"]
   contingent:     ["contingent"]
@@ -100,7 +101,7 @@ section_hints:            # words that narrow narrative search to sections (v1 i
 
 ### `query/planner.py`
 - **Input:** `Intent`.
-- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest`s (isin, fiscal years covering the periods, sections from hints or default `[results_notes, segment_notes, audit_opinion, auditor_report]` (annual-report sections are not indexed in v1, see M08), query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
+- **Process:** expand into a `Plan`: metric values and their input facts for each period (+ comparison periods); narrative `SearchRequest`s (isin, the **exact periods** of the source filings (`SearchRequest.periods`, e.g. the quarters inside an H1 or FY question; fiscal years are not used to pick a quarter), sections from hints or default `[results_notes, segment_notes, audit_opinion, auditor_report, press_release]` (annual-report sections are not indexed in v1, see M08), query text = question + metric name + synonyms) — only for `explanation` and `narrative` types.
 - **Source order by period type** (period components from `core.fiscal.components_of`):
   - **Quarter (Q):** (1) transcripts for that quarter (`source_types=["transcript"]`); then (2) the results text (`source_types=["results"]`: notes to the results, segment notes, audit-opinion declaration, notes/auditor pages of the results PDF) of that quarter's filing, only to fill the remaining `max_chunks_in_prompt` slots if transcript hits don't fill them (or none exist).
   - **Half-year / nine-month (H, 9M):** transcripts for **every quarter inside the period** (H1 = Q1 + Q2 calls, 9M = Q1–Q3), not just the latest; the results text of the filings that cover the period fills remaining slots.
@@ -108,6 +109,10 @@ section_hints:            # words that narrow narrative search to sections (v1 i
   - **Annual reports are not searched in v1** (deferred, M08): the planner never builds an annual-report `SearchRequest`. A question that needs contingent liabilities, key audit matters, CARO, full accounting policies or MD&A (see `section_hints`) gets `Plan.unavailable_sources` naming them, and the answer says that source is not indexed instead of guessing.
   - Within a source type, results are ranked by relevance (RRF), not by quarter; each hit keeps the quarter (`period_label`) it came from. Explicit `section_hints` go straight to the matching results sections.
 - **Output:** `Plan` (logged as JSON, including the source order).
+
+### Reranking (moved here from M08, decision 2026-10-19)
+- M08 `search` returns the RRF-fused list. The retriever asks it for `k_candidates` (> `max_chunks_in_prompt`) and then selects the prompt chunks with **maximal marginal relevance (MMR)** over the candidates' dense vectors (`mmr_lambda` balances relevance against similarity to chunks already chosen), so that four near-identical analyst questions do not crowd out the passage that answers them. Real case: HDFC "asset quality" for Q1 FY27 returns four analysts' question chunks.
+- An **optional small CPU cross-encoder reranker** runs before MMR when `narrative.retrieval.reranker_enabled` is true (`reranker_model` names it; both exist in settings, the reranker is off and blank). New settings (`query.retrieval.k_candidates`, `mmr_lambda`) are added with this module. Transcript-first ordering by period type (above) is applied to the MMR result per source group.
 
 ### `query/retriever.py`
 - **Process:** execute the plan via `metrics.query`, `facts.current_view`, `narrative.search`; include `not_computed` metrics with their reasons.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
@@ -65,6 +66,10 @@ def taxonomy_data() -> dict[str, Any]:
                 },
                 labels=["Profit for the period"],
             ),  # fmt: skip
+            "profit_before_tax": _concept(
+                "profit_and_loss", "duration", labels=["Profit before tax"]
+            ),
+            "tax_expense": _concept("profit_and_loss", "duration", labels=["Total tax expense"]),
             "other_comprehensive_income": _concept(
                 "profit_and_loss",
                 "duration",
@@ -141,6 +146,13 @@ def taxonomy_data() -> dict[str, Any]:
             },
         },
     }
+
+
+@pytest.fixture(autouse=True)
+def gate_identities(isolated_repo: Path) -> None:
+    """The request filters read the gap-fill gate identities from the real rule registry."""
+    real = Path(__file__).resolve().parents[2] / "config" / "validation_rules.yaml"
+    shutil.copy(real, isolated_repo / "config" / "validation_rules.yaml")
 
 
 @pytest.fixture

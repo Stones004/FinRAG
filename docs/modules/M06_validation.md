@@ -98,6 +98,13 @@ Tolerances come from `settings.validation` (`relative_tolerance`, `absolute_tole
 
 ## Rules with special behaviour
 
+### Basis correction and recorded events (2026-10-19)
+- **Basis correction:** before `xbrl_vs_pdf` is evaluated, PDF columns that match the other basis's XBRL (see M05 `basis_check`) are compared with that basis; the row of the right basis lists them under `basis_corrected`, and they are not a restatement cluster (no proposal). Real case: Gabriel Q1 FY27, item 763 (PDF PBT 998.24 is the standalone XBRL value; consolidated XBRL is 905.17).
+- **Recorded events explain clusters:** a `restated_comparative_likely` cluster whose company, basis and restated period end are those of a recorded `accounting_policy_change` / `comparative_restatement` event, and whose differing PDF values are the values that event recorded (`affected_keys`), is attached to that event (`linked_filings` in its details) and not proposed again; an open proposal of the same identity is resolved with `linked_event` (`how`: same restatement as the recorded event). Real case: the Q2 FY26 results restate Netweb's FY25 exactly as the Q4 FY26 results do (item 764, event 1). `finrag review link-event ITEM --event ID` does the same by hand.
+
+### Gap-fill gate status (M05 owns the rule)
+`ValidationStatus.GAP_FILL_REJECTED` (`gap_fill_rejected`) is written by `facts/gap_gate.py` into `validation_results` for PDF/OCR columns the gate refuses (rule id `gap_fill_gate:<filing_id>:<statement>`); it never blocks and is ignored by `is_blocked` and `warnings_for`. `evaluate_isin` reads all stored versions (`include_rejected=True`): the rules run on the current view without the refused facts, while `xbrl_vs_pdf` still compares the refused PDF/OCR values with XBRL (that is where an OCR error is reported). `validation_rules.yaml` carries the `gap_fill_gate.identities` list, checked at load against the `cross_source` identities.
+
 ### `cross_period` (opening cash = prior closing cash)
 M04 stores a cash-flow statement's opening balance as `opening_cash` dated the day before the period starts, which is the date of the earlier period's `closing_cash`. The rule compares the two at that date. On failure it blocks `opening_cash` and `closing_cash` **at that date only**. No closing at that date (the first year on file) is a `skip`.
 

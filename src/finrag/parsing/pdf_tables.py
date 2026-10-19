@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import io
+import re
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 
-from finrag.core.config import ConfigError, Settings, get_settings
+from finrag.core.config import ConfigError, PdfSettings, Settings, get_settings
 from finrag.core.types import Basis, PeriodType
 from finrag.parsing.models import EXTRACTOR_OCR, EXTRACTOR_TABLE, ParsedFact
 from finrag.parsing.numbers import NotANumber, parse_number
 from finrag.parsing.page_classifier import PageLabel
 from finrag.parsing.pdf_text import METHOD_OCR, PageText
-from finrag.parsing.sections import SectionPatterns
+from finrag.parsing.sections import CompiledColumnCheck, Row, SectionPatterns
 from finrag.parsing.table_layout import (
     Line,
     Table,
@@ -192,6 +194,105 @@ def format_outliers(table: Table, periods: Sequence[ColumnPeriod]) -> set[tuple[
     return {(r, c) for r, c, places in cells if places is not None and places != usual}
 
 
+def _clean_label(label: str) -> str:
+    """Row label -> lower case, leading numbering and punctuation removed, spaces collapsed."""
+    return re.sub(r"\s+", " ", re.sub(r"^[^A-Za-z]+", "", label)).strip().lower()
+
+
+def _find_row(table: Table, alternatives: Row) -> int | None:
+    """Index of the first row whose label matches the first matching pattern (priority order)."""
+    for pattern in alternatives:
+        for row in table.rows:
+            if pattern.search(_clean_label(row.label)):
+                return row.index
+    return None
+
+
+def _cell(table: Table, row_index: int, column: int) -> Decimal | None:
+    """The printed number at (row, column), or None (no cell, a dash, not a number)."""
+    for row in table.rows:
+        if row.index == row_index and column in row.cells:
+            try:
+                return parse_number(row.cells[column])
+            except NotANumber:
+                return None
+    return None
+
+
+def _holds(total: Decimal, computed: Decimal, abs_tol: float, rel_tol: float) -> bool:
+    """True when two figures agree within the rounding tolerance (either bound is enough)."""
+    diff = abs(total - computed)
+    return diff <= Decimal(str(abs_tol)) or diff <= Decimal(str(rel_tol)) * abs(total)
+
+
+@dataclass(frozen=True)
+class _Resolved:
+    """A column check with its rows found in one table."""
+
+    total: int
+    plus: list[int]  # required and optional parts present
+    minus: list[int]
+    required: list[int]
+
+
+def _resolve(table: Table, check: CompiledColumnCheck) -> _Resolved | None:
+    """Find the rows of a check in a table; None if a required row is missing."""
+    total = _find_row(table, check.total)
+    parts = [_find_row(table, alternatives) for alternatives in check.parts]
+    minus = [_find_row(table, alternatives) for alternatives in check.minus]
+    if total is None or None in parts or None in minus:
+        return None
+    optional = [_find_row(table, alternatives) for alternatives in check.optional_parts]
+    plus = [r for r in parts if r is not None] + [r for r in optional if r is not None]
+    cleaned_minus = [r for r in minus if r is not None]
+    return _Resolved(total, plus, cleaned_minus, [total, *plus[: len(parts)], *cleaned_minus])
+
+
+def _column_holds(rows: _Resolved, values: dict[int, Decimal], pdf: PdfSettings) -> bool:
+    """True when total = sum(plus rows present) - sum(minus rows) within the rounding tolerance."""
+    computed = sum((values[r] for r in rows.plus if r in values), Decimal(0))
+    computed -= sum((values[r] for r in rows.minus), Decimal(0))
+    return _holds(
+        values[rows.total], computed, pdf.sum_check_abs_tolerance, pdf.sum_check_rel_tolerance
+    )
+
+
+def sum_shifted(
+    table: Table,
+    periods: Sequence[ColumnPeriod],
+    statement_type: str | None,
+    checks: Sequence[CompiledColumnCheck],
+    settings: Settings,
+) -> set[tuple[int, int]]:
+    """(row index, column) of cells that, made 100x larger or smaller, fix a failing column check.
+
+    Each registry check (`column_checks` of the sections registry) is evaluated in each dated column
+    where all its required rows are present. If it fails, each of its cells is tried at
+    value x factor and value / factor; a cell for which the check then holds is returned.
+    """
+    pdf = settings.parsing.pdf
+    factor = Decimal(pdf.sum_shift_factor)
+    found: set[tuple[int, int]] = set()
+    for check in checks:
+        rows = _resolve(table, check) if check.statement == statement_type else None
+        if rows is None:
+            continue
+        for column, period in enumerate(periods):
+            if period.end is None:
+                continue
+            cells = {r: _cell(table, r, column) for r in {rows.total, *rows.plus, *rows.minus}}
+            if any(cells[r] is None for r in rows.required):
+                continue
+            values = {r: v for r, v in cells.items() if v is not None}
+            if _column_holds(rows, values, pdf):
+                continue
+            for row_index, value in values.items():
+                for shifted in (value * factor, value / factor):
+                    if _column_holds(rows, {**values, row_index: shifted}, pdf):
+                        found.add((row_index, column))
+    return found
+
+
 def _native_words(pdf_page: object) -> list[Word]:
     """A pdfplumber page -> positioned words."""
     return [
@@ -220,16 +321,19 @@ def _facts_for_table(
     settings: Settings,
     confidence: float,
     outliers: set[tuple[int, int]],
+    shifted: set[tuple[int, int]],
 ) -> list[ParsedFact]:
     """One ParsedFact per numeric cell in a column that has a period end date.
 
-    A number in `outliers` gets the lower format_outlier_confidence.
+    A number in `outliers` gets the lower format_outlier_confidence; a cell in `shifted` (a sum
+    check holds if it were 100x larger or smaller) gets sum_shift_confidence.
     """
     pdf = settings.parsing.pdf
     if label.unit_from_page:  # the unit was taken from another page: slightly less sure
         confidence = max(0.0, confidence - pdf.unit_inherited_confidence_penalty)
     suffix = f";unit_page={label.unit_from_page}" if label.unit_from_page else ""
     outlier_confidence = min(confidence, pdf.format_outlier_confidence)
+    shifted_confidence = min(confidence, pdf.sum_shift_confidence)
     is_ocr = page.method == METHOD_OCR
     scale = _unit_scale(label.unit_hint, settings)
     basis = label.basis if label.basis is not Basis.UNKNOWN else filing_basis
@@ -264,9 +368,10 @@ def _facts_for_table(
                     statement_type=label.statement_type,
                     extractor=EXTRACTOR_OCR if is_ocr else EXTRACTOR_TABLE,
                     ocr_backend=page.ocr_backend if is_ocr else None,
-                    confidence=outlier_confidence
-                    if (row.index, column) in outliers
-                    else confidence,
+                    confidence=min(
+                        outlier_confidence if (row.index, column) in outliers else confidence,
+                        shifted_confidence if (row.index, column) in shifted else confidence,
+                    ),
                 )
             )
     return facts
@@ -323,6 +428,9 @@ def extract_statement_tables(
             periods = read_headers(table, patterns, label.statement_type, pdf.column_tolerance_pt)
             scores = _confidence(table, periods)
             outliers = format_outliers(table, periods)
+            shifted = sum_shifted(
+                table, periods, label.statement_type, patterns.column_checks, settings
+            )
             facts = _facts_for_table(
                 table,
                 periods,
@@ -333,13 +441,14 @@ def extract_statement_tables(
                 settings,
                 scores["overall"],
                 outliers,
+                shifted,
             )
             if not facts:
                 _unread(result, label, "no column header with a period date")
                 continue
             result.pages_read.append(label.page)
             result.facts.extend(facts)
-            if scores["overall"] < pdf.min_table_confidence or outliers:
+            if scores["overall"] < pdf.min_table_confidence or outliers or shifted:
                 labels_by_row = {r.index: r.label for r in table.rows}
                 result.review_items.append(
                     {
@@ -354,6 +463,13 @@ def extract_statement_tables(
                                 "label": labels_by_row[row],
                             }
                             for row, column in sorted(outliers)
+                        ],
+                        "sum_shifted": [
+                            {
+                                "source_loc": f"{label.page}:{row}:{column + 1}",
+                                "label": labels_by_row[row],
+                            }
+                            for row, column in sorted(shifted)
                         ],
                     }
                 )

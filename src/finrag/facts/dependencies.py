@@ -52,7 +52,7 @@ def affected(fact_ids: Iterable[str], engine: Engine | None = None) -> AffectedS
         for row in given:
             group = (row.isin, row.concept, row.basis)
             groups.add(group)
-            versions = load_facts(conn, row.isin, [row.concept], row.basis)
+            versions = load_facts(conn, row.isin, [row.concept], row.basis, None, True)
             same_key = {
                 v.fact_id
                 for v in versions

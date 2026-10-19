@@ -83,7 +83,7 @@ The later goal (deferred) is to flag possible financial shenanigans. Everything 
 | Fuzzy match | `rapidfuzz` | |
 | Keyword search | `rank_bm25` | |
 | Embeddings | `sentence-transformers` (local model) | Model name in config |
-| Vector index | `numpy` brute force; `faiss-cpu` optional via config | Watch-list scale is small |
+| Vector index | `numpy` brute force | Watch-list scale is small; FAISS dropped at the M08 review |
 | LLM | Any OpenAI-compatible local server over HTTP via `httpx`; LM Studio by default | Behind an interface; swappable. Ollama works at its own `/v1` URL |
 | CLI | `typer` | Single entry point `finrag` |
 | UI | Streamlit | Single-user |
@@ -187,17 +187,17 @@ All tables are created in M00 (`core/db.py`) so later modules never alter the sc
 
 **canonical_facts** (append-only) — `fact_id TEXT PK, isin, concept TEXT, period_start, period_end, period_type, basis, value TEXT, unit TEXT, source_filing_id FK, parsed_fact_id FK, mapping_method TEXT (standard|label|manual), is_derived INTEGER, derivation_json TEXT, filed_on TEXT, created_at, source_class TEXT NOT NULL (xbrl|pdf|ocr|derived)`
 
-**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only|filing_conflict|inbox_unrecognised|normalization_issue|corporate_event_proposal), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
+**review_queue** — `id INTEGER PK, item_type TEXT (unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only|filing_conflict|inbox_unrecognised|normalization_issue|corporate_event_proposal|gap_fill_rejected), payload_json TEXT, occurrences INTEGER, status TEXT (open|resolved|ignored), resolution_json TEXT, created_at, updated_at`
 
 **restatements** — `id INTEGER PK, isin, concept, period_start, period_end, basis, old_fact_id, new_fact_id, abs_diff TEXT, rel_diff TEXT, flagged INTEGER, created_at`
 
 ### 7.4 Validation and metrics
-**validation_results** — `id INTEGER PK, isin, period_end, period_type, basis, rule_id TEXT, status TEXT (pass|warn|block|skip), details_json TEXT, run_id TEXT, created_at`
+**validation_results** — `id INTEGER PK, isin, period_end, period_type, basis, rule_id TEXT, status TEXT (pass|warn|block|skip|gap_fill_rejected), details_json TEXT, run_id TEXT, created_at`
 
 **metric_values** — `metric_value_id TEXT PK, isin, metric_id TEXT, formula_version TEXT, period_start, period_end, period_type, basis, value TEXT NULL, status TEXT (computed|not_computed), reason TEXT, input_fact_ids_json TEXT, run_id TEXT, created_at, details_json TEXT` (v5: machine-readable `code`, `basis_change`, `basis_fallback`, `assumed_zero`, `warnings`, `restatements`; `reason` is a short sentence; see M07)
 
 ### 7.5 Narrative
-**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, source_type TEXT (transcript|results; annual_report reserved, deferred), speaker TEXT NULL, speaker_role TEXT NULL (management|analyst|moderator), page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at`
+**chunks** — `chunk_id TEXT PK, filing_id FK, isin, fiscal_year TEXT, section TEXT, source_type TEXT (transcript|results; annual_report reserved, deferred), period_start TEXT, period_end TEXT, period_type TEXT (copied from the filing at index time; search filters on the exact period), speaker TEXT NULL, speaker_role TEXT NULL (management|analyst|moderator), page INTEGER NULL (NULL for an XBRL text block), seq INTEGER, text TEXT, token_count INTEGER, created_at, meta_json TEXT NULL (basis; transcripts: firm, unit, end_page; PDF chunks: end_page; text blocks: concept)`
 `speaker` and `speaker_role` are set only for transcript chunks. Transcript `section` ∈ {`prepared_remarks`, `qa`, `closing_remarks`}.
 Embeddings and BM25 indexes live under `data/indexes/`, keyed by `chunk_id`.
 
@@ -222,7 +222,7 @@ Embeddings and BM25 indexes live under `data/indexes/`, keyed by `chunk_id`.
 | Filing | `FIL-<first 12 hex of sha256>` |
 | Canonical fact | `FCT-<ulid>` |
 | Metric value | `MET-<ulid>` |
-| Chunk | `CHK-<filing_id>-p<page>-<seq>` |
+| Chunk | `CHK-<filing_id>-p<page>-<seq>`; `CHK-<filing_id>-x-<seq>` for an XBRL text block (no page) |
 | Query | `QRY-<ulid>` |
 | Job / run | `JOB-<ulid>`, `RUN-<ulid>` |
 

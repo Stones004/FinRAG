@@ -132,11 +132,18 @@ Rule = Annotated[
 ]
 
 
+class GapFillGate(_Model):
+    """The M05 gap-fill gate: ids of the cross_source identities a PDF/OCR column must satisfy."""
+
+    identities: list[str]
+
+
 class RulesFile(_Model):
     """Shape of the rule registry."""
 
     version: int
     rules: list[Rule]
+    gap_fill_gate: GapFillGate | None = None
 
 
 @dataclass(frozen=True)

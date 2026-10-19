@@ -847,8 +847,9 @@ known_unmapped:
 
 # PDF/OCR labels that are understood and deliberately not mapped, scoped by the statement of the
 # page they were read on, so they never queue for review. Labels are in normalised form. Every
-# label was seen in the Netweb Q4 FY26 results scan. Checked against the XBRL revision, a label
-# is mapped only when it is unambiguous within its statement AND its value equals the XBRL value;
+# label was seen in the Netweb Q4 FY26 results scan, or (2026-10-19) in the Gabriel and Netweb
+# results PDFs; OCR-garbled labels are not catalogued (they are re-checked after the M03b run).
+# Checked against the XBRL revision, a label is mapped only when it is unambiguous within its statement AND its value equals the XBRL value;
 # 'NOT x' notes record the plausible-looking mappings that are wrong (fuzzy suggestions are never
 # accepted automatically).
 known_unmapped_labels:
@@ -864,6 +865,18 @@ known_unmapped_labels:
     "other equity": { reason: balance_sheet_item, note: "footer of the P&L page, dated as a duration; the balance-sheet line is other_equity" }
     "basic": { reason: income_statement_item, note: "earnings per share: a per-share value, the page unit (millions) must not scale it; XBRL carries eps_basic" }
     "diluted": { reason: income_statement_item, note: "earnings per share: a per-share value, the page unit (millions) must not scale it; XBRL carries eps_diluted" }
+    "deferred tax charge": { reason: income_statement_item, note: "component of tax_expense" }
+    "income tax relating to items that will not be reclassified to profit or loss": { reason: income_statement_item, note: "OCI line" }
+    "total other comprehensive income for the period year": { reason: income_statement_item, note: "OCI total; the XBRL tag is other_comprehensive_income but no XBRL value equals this one, so it is not mapped from the PDF" }
+    "other comprehensive income for the period year net of tax": { reason: income_statement_item, note: "OCI total (PAT plus OCI equals total comprehensive income in the column); not mapped from the PDF: no XBRL value to match" }
+    "total comprehensive income for the period year net of tax": { reason: subtotal, note: "profit plus OCI; no concept in the starter list" }
+    "remeasurement of post employment benefit obligations": { reason: income_statement_item, note: "OCI line" }
+    "net gain on cash flow hedges": { reason: income_statement_item, note: "OCI line" }
+    "depreciation and amortisation expense": { reason: income_statement_item, note: "NOT mapped to depreciation_amortisation from the PDF: a comparative column with no XBRL value to match" }
+    "purchases of stock in trade": { reason: income_statement_item, note: "NOT mapped to purchases_stock_in_trade from the PDF: a comparative column with no XBRL value to match" }
+    "changes in inventories of finished goods work in progress and stock in trade": { reason: income_statement_item, note: "NOT mapped to change_in_inventories from the PDF: a comparative column with no XBRL value to match" }
+    "reserves and surplus": { reason: balance_sheet_item, note: "footer of the P&L page, dated as a duration; the balance-sheet line is other_equity" }
+    "net profit after tax": { reason: income_statement_item, note: "equals profit_after_tax (PBT less tax holds in the FY24 column) but NOT mapped yet: mapping it brings in the FY25 cell read as 211867 for 2118.67, which fails the PAT identity and would reject seven good cells of that column; revisit after the M03b run" }
   balance_sheet:
     "right of use assets": balance_sheet_item
     "intangible assets under development financial assets investments": { reason: ocr_merged_label, note: "section header merged into the line; value equals XBRL IntangibleAssetsUnderDevelopment" }
@@ -884,6 +897,14 @@ known_unmapped_labels:
     "other financial liabilities": { reason: balance_sheet_item, note: "appears under both non-current and current liabilities" }
     "other current liabilities": { reason: balance_sheet_item, note: "NOT total_current_liabilities: a component" }
     "current tax liabilities": { reason: balance_sheet_item, note: "NOT total_current_liabilities: a component" }
+    "bank balances other than ii above": { reason: balance_sheet_item, note: "bank balances other than cash and cash equivalents" }
+    "deferred tax asset": balance_sheet_item
+    "income tax assets": balance_sheet_item
+    "intangible assets": { reason: balance_sheet_item, note: "NOT mapped to intangible_assets from the PDF: no XBRL value to match" }
+    "intangible assets under development": { reason: balance_sheet_item, note: "value equals XBRL IntangibleAssetsUnderDevelopment when both are present" }
+    "investment properties": balance_sheet_item
+    "investments": { reason: balance_sheet_item, note: "appears under both non-current and current assets, so the label alone is ambiguous" }
+    "loans": { reason: balance_sheet_item, note: "appears under both non-current and current assets, so the label alone is ambiguous" }
   cash_flow:
     "profit before tax": { reason: cash_flow_adjustment, note: "starting line of the cash-flow reconciliation; the P&L line is profit_before_tax" }
     "depreciation and amortization expense": { reason: cash_flow_adjustment, note: "cash-flow add-back, excludes right-of-use depreciation (FY25: 90.12 mn against 113.43 mn on the P&L), so it is NOT depreciation_amortisation" }
@@ -921,3 +942,40 @@ known_unmapped_labels:
     "monitoring account and public account": { reason: cash_flow_item, note: "IPO proceeds held in a monitoring account" }
     "recovery of ipo and pre ipo expenses": cash_flow_item
     "issue of fresh capital": { reason: cash_flow_item, note: "proceeds from issuing shares" }
+    "net profit before tax": { reason: cash_flow_adjustment, note: "starting line of the cash-flow reconciliation; the P&L line is profit_before_tax" }
+    "adjustments for depreciation and amortisation expense": cash_flow_adjustment
+    "amortisation of government grant": cash_flow_adjustment
+    "bad debt written off": cash_flow_adjustment
+    "changes in fair value of investment in equity instruments": cash_flow_adjustment
+    "changes in fair value of investment in mutual funds": cash_flow_adjustment
+    "dividend income from related party": cash_flow_adjustment
+    "gain on sale of investments": cash_flow_adjustment
+    "insurance income": cash_flow_adjustment
+    "interest income on fixed deposit with banks and financial assets": cash_flow_adjustment
+    "interest income on fixed deposits with banks and financial assets": cash_flow_adjustment
+    "interest on income tax refund": cash_flow_adjustment
+    "loss on disposal of property plant and equipment": cash_flow_adjustment
+    "provision for contingencies": cash_flow_adjustment
+    "provisions no longer required written back": cash_flow_adjustment
+    "rental income": cash_flow_adjustment
+    "increase in inventories": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in other current financial assets": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in other current financial liabilities": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in other current liabilities": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "increase in trade receivables": { reason: cash_flow_adjustment, note: "working-capital change" }
+    "income taxes paid": cash_flow_item
+    "payment for intangible assets including intangible asset under development": cash_flow_item
+    "payment for intangible assets including intangible assets under development": cash_flow_item
+    "payment for investment in fixed deposits": cash_flow_item
+    "payment for investment property": cash_flow_item
+    "payment for property plant and equipment including capital work in progress": cash_flow_item
+    "payment for purchase of investments": cash_flow_item
+    "payment made for right of use assets": cash_flow_item
+    "proceeds from sale of mutual funds": cash_flow_item
+    "dividend received": cash_flow_item
+    "interest received": cash_flow_item
+    "loan to subsidiary": cash_flow_item
+    "loans to employees": cash_flow_item
+    "repayment of loans by subsidiary": cash_flow_item
+    "purchase of property plant and equipment cwip including intangible assets capital advances and capital creditors": { reason: cash_flow_item, note: "capex_ppe plus capex_intangibles combined; mapped from XBRL only" }
+    "net cash outflow from investing activities": { reason: subtotal, note: "NOT mapped to cfi from the PDF: one filing carries two different values under this label for one year (standalone and consolidated pages), and no XBRL value matches" }

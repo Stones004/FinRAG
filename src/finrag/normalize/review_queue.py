@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import sqlalchemy as sa
@@ -94,6 +95,8 @@ def load_resolutions(engine: Engine | None = None) -> Resolutions:
         key_type, key, family = payload["key_type"], payload["key"], payload["family"]
         scope = payload.get("statement") or ""
         if row.status == STATUS_IGNORED:
+            if row.resolution_json and json.loads(row.resolution_json).get("auto_closed"):
+                continue  # closed because the value was not needed then: evaluate it again
             if key_type == KEY_QNAME:
                 found.ignored_qnames.add((family, key))
             else:
@@ -140,8 +143,11 @@ def resolve(item_id: int, concept: str, taxonomy: Taxonomy, engine: Engine | Non
         )
 
 
-def ignore(item_id: int, engine: Engine | None = None) -> None:
-    """Mark an open item ignored (an ignored unmapped_concept is not queued again)."""
+def ignore(item_id: int, engine: Engine | None = None, reason: str | None = None) -> None:
+    """Mark an open item ignored (an ignored unmapped_concept is not queued again).
+
+    The optional reason is stored with the item (`resolution_json`).
+    """
     with transaction(engine) as conn:
         row = _get_item(conn, item_id)
         if row.status != STATUS_OPEN:
@@ -149,8 +155,54 @@ def ignore(item_id: int, engine: Engine | None = None) -> None:
         conn.execute(
             sa.update(tables.review_queue)
             .where(tables.review_queue.c.id == item_id)
-            .values(status=STATUS_IGNORED, updated_at=utc_now_iso())
+            .values(
+                status=STATUS_IGNORED,
+                resolution_json=json.dumps({"reason": reason}) if reason else None,
+                updated_at=utc_now_iso(),
+            )
         )
+
+
+def close_not_needed(reports: Sequence[Any], engine: Engine | None = None) -> int:
+    """Close open items that a normalize run found unnecessary -> how many were closed.
+
+    Each report has `dropped` (NotNeeded: item type, match, reason) and `queued_unmapped`. An
+    unmapped label is closed only if no filing of the run queued it. Closed items are `ignored`
+    with the reason and `auto_closed`, so a later run looks at the label again.
+    """
+    queued: set[Any] = set()
+    for report in reports:
+        queued |= report.queued_unmapped
+    queue = tables.review_queue
+    closed = 0
+    with transaction(engine) as conn:
+        for report in reports:
+            for need in report.dropped:
+                if need.item_type == ITEM_UNMAPPED:
+                    ident = tuple(need.match[k] for k in ("isin", "key", "key_type", "statement"))
+                    if ident in queued:
+                        continue
+                rows = conn.execute(
+                    sa.select(queue).where(
+                        queue.c.item_type == need.item_type, queue.c.status == STATUS_OPEN
+                    )
+                ).all()
+                for row in rows:
+                    payload = json.loads(row.payload_json)
+                    if all(payload.get(k) == v for k, v in need.match.items()):
+                        conn.execute(
+                            sa.update(queue)
+                            .where(queue.c.id == row.id)
+                            .values(
+                                status=STATUS_IGNORED,
+                                resolution_json=json.dumps(
+                                    {"reason": need.reason, "auto_closed": True}, sort_keys=True
+                                ),
+                                updated_at=utc_now_iso(),
+                            )
+                        )
+                        closed += 1
+    return closed
 
 
 def list_items(

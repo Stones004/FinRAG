@@ -12,6 +12,7 @@ from finrag.core.logging import configure_logging, get_logger
 from finrag.facts.cli import facts_app
 from finrag.ingestion.cli import ingest_app
 from finrag.metrics.cli import metrics_app
+from finrag.narrative.cli import narrative_app
 from finrag.normalize.cli import normalize_app, review_app
 from finrag.parsing.cli import parse_app
 from finrag.validation.cli import validate_app
@@ -28,6 +29,7 @@ app.add_typer(review_app, name="review")
 app.add_typer(facts_app, name="facts")
 app.add_typer(validate_app, name="validate")
 app.add_typer(metrics_app, name="metrics")
+app.add_typer(narrative_app, name="narrative")
 
 
 def _load_settings() -> Settings:

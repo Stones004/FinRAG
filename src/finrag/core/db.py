@@ -14,10 +14,10 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.config import get_settings
 from finrag.core.types import utc_now_iso
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Upgrade steps from version N to N+1: plain SQL run once on an existing database
-# (M03: v2, v3; M05: v4; M07: v5).
+# (M03: v2, v3; M05: v4; M07: v5; M08: v6).
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT",),
     2: ("ALTER TABLE parsed_facts ADD COLUMN statement_type TEXT",),
@@ -25,6 +25,12 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     # added NOT NULL column needs one (a fresh database has no default).
     3: ("ALTER TABLE canonical_facts ADD COLUMN source_class TEXT NOT NULL DEFAULT 'xbrl'",),
     4: ("ALTER TABLE metric_values ADD COLUMN details_json TEXT",),
+    5: (
+        "ALTER TABLE chunks ADD COLUMN period_start TEXT",
+        "ALTER TABLE chunks ADD COLUMN period_end TEXT",
+        "ALTER TABLE chunks ADD COLUMN period_type TEXT",
+        "ALTER TABLE chunks ADD COLUMN meta_json TEXT",
+    ),
 }
 
 metadata = sa.MetaData()
@@ -165,6 +171,7 @@ _table(
     _id_pk(),
     # unmapped_concept|ambiguous_basis|low_confidence_table|entity_ambiguous|transcript_link_only
     # |filing_conflict|inbox_unrecognised|normalization_issue|corporate_event_proposal
+    # |gap_fill_rejected
     _text("item_type"),
     _text("payload_json"),
     _int("occurrences"),
@@ -198,7 +205,7 @@ _table(
     _text("period_type"),
     _text("basis"),
     _text("rule_id"),
-    _text("status"),  # pass|warn|block|skip
+    _text("status"),  # pass|warn|block|skip|gap_fill_rejected
     _text("details_json"),
     _text("run_id"),
     _text("created_at"),
@@ -232,7 +239,11 @@ _table(
     _text("isin"),
     _text("fiscal_year"),
     _text("section"),
-    _text("source_type"),  # annual_report|transcript|results
+    _text("source_type"),  # transcript|results (annual_report reserved, deferred)
+    # period of the source filing, copied at index time so a period filter needs no join
+    _text("period_start"),
+    _text("period_end"),
+    _text("period_type"),
     _text("speaker"),
     _text("speaker_role"),  # management|analyst|moderator
     _int("page"),
@@ -240,8 +251,11 @@ _table(
     _text("text"),
     _int("token_count"),
     _text("created_at"),
+    # JSON: basis, analyst firm, XBRL concept, qa_unit, ... (see M08)
+    _text("meta_json"),
     sa.ForeignKeyConstraint(["filing_id"], ["filings.filing_id"]),
     sa.Index("ix_chunks_isin_fy", "isin", "fiscal_year"),
+    sa.Index("ix_chunks_isin_period", "isin", "period_end", "period_type"),
 )
 
 # --- 7.6 query and operations ---

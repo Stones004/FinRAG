@@ -8,6 +8,7 @@ source. `as_of` returns what was known on that date.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Iterable, Sequence
 from datetime import date
@@ -18,6 +19,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from finrag.core.db import tables, transaction
 from finrag.core.types import FilingStatus, Period, PeriodType, SourceClass
+from finrag.facts.gap_gate import REASON_INPUT_REJECTED, rejected_fact_ids
 from finrag.facts.models import Fact
 from finrag.normalize.taxonomy import placeholder_guards
 
@@ -74,8 +76,13 @@ def load_facts(
     concepts: Sequence[str] | None = None,
     basis: str | None = None,
     periods: Sequence[Period] | None = None,
+    include_rejected: bool = False,
 ) -> list[Fact]:
-    """Every stored fact (all versions, quarantined filings excluded) matching the filters."""
+    """Every stored fact (all versions, quarantined filings excluded) matching the filters.
+
+    Facts the gap-fill gate refused (and derived facts built on them) are left out, unless
+    `include_rejected` is true; then they are returned with `gap_rejected` set.
+    """
     c = tables.canonical_facts
     query = _select().where(c.c.isin == isin)
     if concepts is not None:
@@ -86,10 +93,32 @@ def load_facts(
         query = query.where(c.c.period_end.in_(sorted({p.end.isoformat() for p in periods})))
     facts = [_to_fact(r) for r in conn.execute(query.order_by(c.c.created_at, c.c.fact_id))]
     facts = _without_placeholders(conn, isin, facts)
+    facts = _mark_rejected(conn, isin, facts, include_rejected)
     if periods is not None:
         wanted = {(p.start, p.end) for p in periods}
         facts = [f for f in facts if (f.period.start, f.period.end) in wanted]
     return facts
+
+
+def _mark_rejected(
+    conn: Connection, isin: str, facts: list[Fact], include_rejected: bool
+) -> list[Fact]:
+    """Flag (or drop) the facts the gate refused, and derived facts that used one."""
+    refused = rejected_fact_ids(conn, isin)
+    if not refused:
+        return facts
+    marked = []
+    for fact in facts:
+        reason = refused.get(fact.fact_id)
+        if reason is None and fact.is_derived:
+            used = set((fact.derivation or {}).get("input_fact_ids", []))
+            if used & set(refused):
+                reason = REASON_INPUT_REJECTED
+        if reason is None:
+            marked.append(fact)
+        elif include_rejected:
+            marked.append(dataclasses.replace(fact, gap_rejected=True, gap_reason=reason))
+    return marked
 
 
 def _without_placeholders(conn: Connection, isin: str, facts: list[Fact]) -> list[Fact]:

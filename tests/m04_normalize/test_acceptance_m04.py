@@ -149,15 +149,14 @@ def test_5a_low_confidence_pdf_covered_by_xbrl_needs_no_item(kit, taxonomy, writ
     assert review_queue.list_items(None, "normalization_issue") == []
 
 
-def test_5a_low_confidence_pdf_as_sole_source_has_a_review_item(kit, taxonomy, writer) -> None:
+def test_5a_low_confidence_pdf_as_sole_source_is_counted_not_queued(kit, taxonomy, writer) -> None:
+    """The gap-fill gate (M05) refuses the value and says so; M04 raises no item for it."""
     _pdf_revenue(kit, 0.3)
-    run_normalize(writer, taxonomy=taxonomy)
+    (report,) = run_normalize(writer, taxonomy=taxonomy)
     (candidate,) = writer.all
     assert candidate.confidence == 0.3 and candidate.extractor == "ocr"
-    (item,) = review_queue.list_items(None, "normalization_issue")
-    payload = json.loads(item.payload_json)
-    assert payload["reason"] == "low_confidence_sole_source"
-    assert payload["detail"]["confidence"] == 0.3
+    assert review_queue.list_items(None, "normalization_issue") == []
+    assert report.stats["not_queued"] == {"gate_owns_low_confidence": 1}
 
 
 def test_5a_confident_pdf_sole_source_needs_no_item(kit, taxonomy, writer) -> None:

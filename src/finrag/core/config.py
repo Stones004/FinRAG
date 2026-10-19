@@ -223,6 +223,10 @@ class PdfSettings(_Model):
         ge=0, le=1
     )  # taken off facts using a unit from another page
     format_outlier_confidence: float = Field(ge=0, le=1)  # cap for a number with unusual decimals
+    sum_shift_confidence: float = Field(ge=0, le=1)  # cap for a cell whose x100 / x0.01 fixes a sum
+    sum_shift_factor: int = Field(ge=2)  # the shift tried on each cell of a failing column identity
+    sum_check_abs_tolerance: float = Field(ge=0)  # printed units; rounding of a column identity
+    sum_check_rel_tolerance: float = Field(ge=0)  # relative to the identity's total
     statement_page_min_score: int = Field(ge=0)
     quality_min_token_len: int = Field(ge=1)  # shortest alphabetic token the quality score counts
     row_tolerance_pt: float = Field(gt=0)  # words within this vertical distance share a table row
@@ -283,7 +287,8 @@ class NarrativeSettings(_Model):
     embedding_model: str
     embedding_device: Literal["cpu", "cuda"]
     embedding_batch_size: int = Field(gt=0)
-    vector_backend: Literal["numpy", "faiss"]
+    embedding_query_prefix: str  # prepended to search queries only (model-specific; "" for none)
+    vector_backend: Literal["numpy"]  # faiss was dropped at the M08 review: numpy is enough
     index_annual_reports: bool
     annual_report_sections_include: list[str]
     log_skipped_sections: bool

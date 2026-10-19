@@ -136,3 +136,21 @@ def confirm_event(
     except (ReviewError, ValueError) as exc:
         raise _fail(exc) from exc
     typer.echo(f"item {item_id} resolved: corporate event {event_id} recorded")
+
+
+@review_app.command("link-event")
+def link_event(
+    item_id: Annotated[int, typer.Argument(help="corporate_event_proposal item id")],
+    event_id: Annotated[int, typer.Option("--event", help="Recorded corporate event id")],
+) -> None:
+    """Close a proposal as the same restatement as a recorded event (resolves the item)."""
+    from finrag.core.db import init_db
+    from finrag.normalize.review_queue import ReviewError
+    from finrag.validation.events import link_item
+
+    try:
+        init_db()
+        link_item(item_id, event_id)
+    except ReviewError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"item {item_id} resolved: linked to corporate event {event_id}")

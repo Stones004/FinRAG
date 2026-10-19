@@ -42,6 +42,7 @@ def run(
     """Normalize `parsed` filings and hand the candidates to the fact store (M05)."""
     from finrag.core.db import init_db
     from finrag.facts.derivation import derive_isin
+    from finrag.facts.gap_gate import run_gate
     from finrag.facts.writer import WriteStats, write_candidates
     from finrag.normalize.runner import NormalizeError, run_normalize
     from finrag.normalize.taxonomy import TaxonomyError
@@ -59,6 +60,9 @@ def run(
         reports = run_normalize(writer, filing)
         derived = WriteStats()
         for isin in sorted(total.isins):
+            gate = run_gate(isin)  # PDF/OCR columns that may not fill gaps, before deriving
+            if gate.rejected_facts:
+                typer.echo(f"gap-fill gate {isin}: {json.dumps(gate.as_dict(), sort_keys=True)}")
             derived.merge(derive_isin(isin))
     except (ConfigError, TaxonomyError, NormalizeError) as exc:
         raise _fail(exc) from exc
@@ -125,14 +129,17 @@ def resolve_item(
 
 
 @review_app.command("ignore")
-def ignore_item(item_id: Annotated[int, typer.Argument(help="Review item id")]) -> None:
+def ignore_item(
+    item_id: Annotated[int, typer.Argument(help="Review item id")],
+    reason: Annotated[str | None, typer.Option(help="Why; stored with the item")] = None,
+) -> None:
     """Ignore a review item (an ignored unmapped_concept is not queued again)."""
     from finrag.core.db import init_db
     from finrag.normalize.review_queue import ReviewError, ignore
 
     try:
         init_db()
-        ignore(item_id)
+        ignore(item_id, reason=reason)
     except ReviewError as exc:
         raise _fail(exc) from exc
     typer.echo(f"item {item_id} ignored")

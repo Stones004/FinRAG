@@ -22,9 +22,24 @@ from finrag.normalize import review_queue as queue
 from finrag.normalize.basis import resolve_basis
 from finrag.normalize.mapper import Known, Mapped, Mapper, NotApplicable, Unmapped
 from finrag.normalize.models import CandidateWriter, CanonicalCandidate
-from finrag.normalize.periods import ANCHOR_DAY_BEFORE_START, ANCHOR_END, classify
+from finrag.normalize.periods import (
+    ANCHOR_DAY_BEFORE_START,
+    ANCHOR_END,
+    REASON_PERIOD_MISSING,
+    classify,
+)
 from finrag.normalize.taxonomy import Concept, Taxonomy, load_taxonomy
 from finrag.normalize.units import to_canonical
+from finrag.normalize.usable import (
+    ITEM_ISSUE,
+    ITEM_UNMAPPED,
+    REASONS,
+    UNUSABLE_ISSUES,
+    NotNeeded,
+    Usability,
+    build_usability,
+    unmapped_reason,
+)
 from finrag.parsing.models import EXTRACTOR_XBRL, ParsedFact
 
 JOB_TYPE = "normalize"
@@ -69,6 +84,7 @@ class UnmappedRequest:
 
     outcome: Unmapped
     example: dict[str, Any]
+    fact: ParsedFact | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +94,8 @@ class IssueRequest:
     reason: str
     key: str
     detail: dict[str, Any]
+    extractor: str | None = None  # of the fact it is about (None: not tied to one fact)
+    covered_key: tuple[str, date, date, str] | None = None  # concept key an XBRL fact may cover
 
 
 @dataclass
@@ -97,6 +115,8 @@ class NormalizeOutcome:
     not_applicable: int = 0
     placeholder_zero: int = 0  # reported 0 for a concept where 0 means "not disclosed"
     unmapped_count: int = 0
+    dropped: list[NotNeeded] = field(default_factory=list)  # requests not queued, with reasons
+    not_queued: Counter[str] = field(default_factory=Counter)  # reason code -> count
 
     def stats(self) -> dict[str, Any]:
         """Counts for the jobs row and the CLI."""
@@ -111,6 +131,7 @@ class NormalizeOutcome:
             "not_applicable": self.not_applicable,
             "placeholder_zero": self.placeholder_zero,
             "unmapped": self.unmapped_count,
+            "not_queued": dict(self.not_queued),
             "basis_unknown": self.basis_unknown,
             "issues": dict(Counter(i.reason for i in self.issues)),
         }
@@ -202,7 +223,11 @@ def _normalize_mapped(
     fact, concept = row.fact, taxonomy.concepts[name]
 
     def reject(reason: str, detail: str) -> None:
-        out.issues.append(IssueRequest(reason, _fact_key(row), {"concept": name, "detail": detail}))
+        out.issues.append(
+            IssueRequest(
+                reason, _fact_key(row), {"concept": name, "detail": detail}, row.fact.extractor
+            )
+        )
 
     converted = to_canonical(fact, concept, taxonomy)
     if converted.value is None:
@@ -213,6 +238,15 @@ def _normalize_mapped(
         anchor = ANCHOR_DAY_BEFORE_START if name in taxonomy.opening_names else ANCHOR_END
     if concept.zero_is_placeholder and converted.value == 0:
         out.placeholder_zero += 1  # never store a false 0
+        return None
+    if (
+        anchor == ANCHOR_DAY_BEFORE_START
+        and fact.extractor != EXTRACTOR_XBRL
+        and fact.period_start is None
+    ):
+        # A PDF column whose header gave no period kind has no start, so the day before it cannot
+        # be told; dating the balance at the column's end would put it on the wrong day.
+        reject(REASON_PERIOD_MISSING, "opening balance of a column whose period start is unknown")
         return None
     placed = classify(fact.period_start, fact.period_end, concept.period_kind, anchor)
     if placed.period is None:
@@ -246,16 +280,13 @@ def _normalize_mapped(
         and fact.confidence < min_confidence
         and candidate.key not in covered
     ):
-        out.issues.append(
-            IssueRequest(
-                ISSUE_LOW_CONFIDENCE,
-                _fact_key(row),
-                {
-                    "concept": name,
-                    "value": str(converted.value),
-                    "confidence": fact.confidence,
-                    "detail": "no XBRL fact covers it; this is the only source",
-                },
+        # no longer an item: the gap-fill gate refuses the value and says so (gap_fill_rejected)
+        out.not_queued["gate_owns_low_confidence"] += 1
+        out.dropped.append(
+            NotNeeded(
+                ITEM_ISSUE,
+                {"filing_id": ctx.filing_id, "reason": ISSUE_LOW_CONFIDENCE, "key": _fact_key(row)},
+                REASONS["gate_owns_low_confidence"],
             )
         )
     return candidate
@@ -296,6 +327,8 @@ def _drop_conflicting(out: NormalizeOutcome) -> None:
                 ISSUE_DUPLICATE_CANDIDATES,
                 f"{key[0]}|{key[1]}|{key[2]}|{key[3]}",
                 {"concept": key[0], "values": values},
+                next(c.extractor for c in out.candidates if c.key == key),
+                key,
             )
         )
     out.candidates = [c for k, c in first.items() if k not in conflicting]
@@ -353,7 +386,9 @@ def normalize_facts(
             continue
         out.considered += 1
         if not (row.fact.concept_raw or row.fact.label_raw):
-            out.issues.append(IssueRequest(ISSUE_NO_NAME, _fact_key(row), {"fact_id": row.id}))
+            out.issues.append(
+                IssueRequest(ISSUE_NO_NAME, _fact_key(row), {"fact_id": row.id}, row.fact.extractor)
+            )
             continue
         result = mapper.map_fact(row.fact, ctx.family, ctx.sector)
         if isinstance(result, Mapped):
@@ -367,7 +402,7 @@ def normalize_facts(
                 duplicates.append((row, entry.qname, entry.duplicate_of))
         elif isinstance(result, Unmapped):
             out.unmapped_count += 1
-            out.unmapped.append(UnmappedRequest(result, _example(row.fact)))
+            out.unmapped.append(UnmappedRequest(result, _example(row.fact), row.fact))
     starts = _cash_flow_starts(mapped, taxonomy, ctx.basis)
     for row, result in mapped:
         concept = taxonomy.concepts[result.concept]
@@ -396,6 +431,8 @@ class NormalizeReport:
     status: str  # normalized | skipped | failed
     stats: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    dropped: list[NotNeeded] = field(default_factory=list)
+    queued_unmapped: set[tuple[str, str, str, str | None]] = field(default_factory=set)
 
 
 def _context(filing: sa.Row, sector: str, taxonomy: Taxonomy) -> FilingContext:
@@ -462,6 +499,50 @@ def xbrl_keys(
     return frozenset(keys)
 
 
+def apply_usability(
+    out: NormalizeOutcome, ctx: FilingContext, taxonomy: Taxonomy, usable: Usability | None
+) -> None:
+    """Keep only the PDF/OCR requests whose value would be used; count and list the rest."""
+    if usable is None:
+        return
+    kept_unmapped = []
+    for req in out.unmapped:
+        code = (
+            unmapped_reason(req.fact, ctx.basis, out.candidates, taxonomy, usable)
+            if req.fact is not None
+            else None
+        )
+        if code is None:
+            kept_unmapped.append(req)
+            continue
+        out.not_queued[f"unmapped: {code}"] += 1
+        match = {
+            "isin": ctx.isin,
+            "key": req.outcome.key,
+            "key_type": req.outcome.key_type,
+            "statement": req.outcome.statement,
+        }
+        out.dropped.append(NotNeeded(ITEM_UNMAPPED, match, REASONS[code]))
+    out.unmapped = kept_unmapped
+    kept_issues = []
+    for issue in out.issues:
+        code = None
+        if issue.extractor not in (None, EXTRACTOR_XBRL):
+            if issue.reason in UNUSABLE_ISSUES:
+                code = "unusable_cell"
+            elif issue.covered_key is not None and issue.covered_key in usable.covered:
+                code = "xbrl_covers_key"
+            elif issue.reason == ISSUE_DUPLICATE_CANDIDATES:
+                code = "ambiguous_duplicate"
+        if code is None:
+            kept_issues.append(issue)
+            continue
+        out.not_queued[f"{issue.reason}: {code}"] += 1
+        match = {"filing_id": ctx.filing_id, "reason": issue.reason, "key": issue.key}
+        out.dropped.append(NotNeeded(ITEM_ISSUE, match, REASONS[code]))
+    out.issues = kept_issues
+
+
 def _persist_requests(ctx: FilingContext, out: NormalizeOutcome, engine: Engine | None) -> None:
     """Queue the unmapped items, basis item and issues of one filing (one transaction)."""
     with transaction(engine) as conn:
@@ -490,6 +571,7 @@ def normalize_filing(
     settings: Settings,
     covered_for: Callable[[str], frozenset[tuple[str, date, date, str]]],
     engine: Engine | None = None,
+    usable_for: Callable[[str], Usability | None] | None = None,
 ) -> NormalizeReport:
     """One `parsed` filing -> review items, candidates to the writer, status `normalized`."""
     report = NormalizeReport(filing.filing_id, FilingStatus.NORMALIZED.value)
@@ -509,7 +591,14 @@ def normalize_filing(
                 settings.parsing.pdf.min_table_confidence,
                 covered,
             )
+            if filing.format != FilingFormat.XBRL.value and usable_for is not None:
+                apply_usability(out, ctx, mapper.taxonomy, usable_for(filing.isin))
             report.stats = out.stats()
+            report.dropped = out.dropped
+            report.queued_unmapped = {
+                (ctx.isin, r.outcome.key, r.outcome.key_type, r.outcome.statement)
+                for r in out.unmapped
+            }
             _persist_requests(ctx, out, engine)
             writer(out.candidates)
         registry.set_status(filing.filing_id, FilingStatus.NORMALIZED, None, engine)
@@ -562,4 +651,17 @@ def run_normalize(
             cache[isin] = xbrl_keys(isin, mapper, settings.parsing.pdf.min_table_confidence, engine)
         return cache[isin]
 
-    return [normalize_filing(f, mapper, writer, settings, covered_for, engine) for f in filings]
+    usable_cache: dict[str, Usability] = {}
+
+    def usable_for(isin: str) -> Usability:
+        """Company-level inputs of the request filters, computed once per run."""
+        if isin not in usable_cache:
+            usable_cache[isin] = build_usability(isin, covered_for(isin), settings, engine)
+        return usable_cache[isin]
+
+    reports = [
+        normalize_filing(f, mapper, writer, settings, covered_for, engine, usable_for)
+        for f in filings
+    ]
+    queue.close_not_needed(reports, engine)
+    return reports

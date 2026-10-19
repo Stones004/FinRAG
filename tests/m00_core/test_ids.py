@@ -45,3 +45,4 @@ def test_filing_id_is_deterministic() -> None:
 
 def test_chunk_id() -> None:
     assert ids.chunk_id("FIL-abababababab", 7, 2) == "CHK-FIL-abababababab-p7-2"
+    assert ids.chunk_id("FIL-abababababab", None, 3) == "CHK-FIL-abababababab-x-3"

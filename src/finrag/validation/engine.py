@@ -8,6 +8,7 @@ one rule that reads every stored version.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections import defaultdict
 from collections.abc import Collection
@@ -24,6 +25,7 @@ from finrag.core.ids import PREFIX_RUN, new_id
 from finrag.core.jobs import finish_job, start_job
 from finrag.core.logging import get_logger
 from finrag.core.types import JobStatus, Period, PeriodType, ValidationStatus, utc_now_iso
+from finrag.facts.basis_check import default_group, misbased_columns
 from finrag.facts.current_view import current_of, load_facts
 from finrag.facts.dependencies import PeriodKey
 from finrag.facts.models import Fact
@@ -266,17 +268,38 @@ def evaluate_isin(
     out = Evaluation()
     with transaction(engine) as conn:
         sector = _sector_of(conn, isin)
-        versions = load_facts(conn, isin)
+        versions = load_facts(conn, isin, include_rejected=True)
     by_basis: dict[str, list[Fact]] = defaultdict(list)
     for fact in versions:
         by_basis[fact.basis].append(fact)
+    # A PDF column whose values match the other basis's XBRL on every shared key was filed under
+    # the wrong basis (its page names none): compare it with the basis it belongs to.
+    misbased = misbased_columns(by_basis, settings)
+    compared: dict[str, list[Fact]] = defaultdict(list)
+    for basis, facts in by_basis.items():
+        for fact in facts:
+            true = misbased.get((default_group(fact), basis))
+            if true and fact.source_class.value in ("pdf", "ocr"):
+                compared[true].append(dataclasses.replace(fact, basis=true))
+            else:
+                compared[basis].append(fact)
     for basis, facts in sorted(by_basis.items()):
-        current = _current(facts)
+        current = _current([f for f in facts if not f.gap_rejected])
         for rule in rules.rules:
             if not rules.applies_to(rule, sector):
                 continue
             if isinstance(rule, CrossSourceRule):
-                rows, restated = _cross_source_rows(isin, basis, rule, facts, periods, settings)
+                rows, restated = _cross_source_rows(
+                    isin, basis, rule, compared[basis], periods, settings
+                )
+                for row in rows:
+                    moved = [
+                        {"pdf_filing": f, "labelled": b, "values_match": t}
+                        for ((f, e), b), t in misbased.items()
+                        if t == basis and e.isoformat() == row.period_end
+                    ]
+                    if moved:
+                        row.details["basis_corrected"] = moved
                 out.restated.extend((isin, c, rule.id) for c in restated)
             elif isinstance(rule, CrossPeriodRule):
                 rows = _cross_period_rows(isin, basis, rule, current, periods, settings)
@@ -315,7 +338,13 @@ def run_validation(
                     )
                 )
             for code, cluster, rule_id in evaluation.restated:
-                item = propose_event(conn, code, cluster, rule_id)
+                item = propose_event(
+                    conn,
+                    code,
+                    cluster,
+                    rule_id,
+                    get_settings().validation.cross_source.rounding_inr,
+                )
                 if item is not None:
                     proposals.append(item)
         report = ValidationReport(run_id, isin, evaluation.results, sorted(set(proposals)))

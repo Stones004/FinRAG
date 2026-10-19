@@ -102,6 +102,28 @@ def test_pdf_cash_flow_instants_come_from_the_duration_column(kit, taxonomy, wri
     assert got[("closing_cash", date(2026, 3, 31))] == kit.D("3655220000.00")
 
 
+def test_pdf_opening_cash_of_a_column_without_a_start_is_not_dated_at_its_end(
+    kit, taxonomy, writer
+) -> None:
+    """Real case: HDFC's cash-flow headers gave dates only (no period kind), so the column had no
+    start; the opening balance used to land on the column's end date (1,651,422.7 mn closing cash
+    at 30 Sep 2025 against an "opening" of 2,395,706.8 mn dated the same day)."""
+    kit.add_filing(kit.PDF_FILING, fmt="pdf", family=None)
+    for label, value in (
+        ("Cash at the beginning of the year", "1700.83"),
+        ("Cash at the end of the year", "3655.22"),
+    ):
+        kit.add_fact(
+            value, label=label, start=None, end=FY[1], unit=None, scale=1_000_000,
+            extractor="ocr", confidence=0.95, filing_id=kit.PDF_FILING,
+        )  # fmt: skip
+    run_normalize(writer, taxonomy=taxonomy)
+    got = {(c.concept, c.period_end): c.value for c in writer.all}
+    assert not [k for k in got if k[0] == "opening_cash"]
+    assert got[("closing_cash", date(2026, 3, 31))] == kit.D("3655220000.00")  # the end is certain
+    assert items("normalization_issue") == []  # an unusable cell is counted, not queued
+
+
 def test_equal_duplicate_is_silent_and_a_differing_one_raises_an_item(
     kit, taxonomy, writer
 ) -> None:

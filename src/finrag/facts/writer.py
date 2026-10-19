@@ -128,7 +128,7 @@ def _record_neighbours(
 def append_fact(conn: Connection, new: NewFact, settings: Settings, stats: WriteStats) -> None:
     """Append one fact unless it is a repeat; record restatements against its neighbours."""
     period = Period(new.period.start, new.period.end, new.period.type)
-    existing = load_facts(conn, new.isin, [new.concept], new.basis, [period])
+    existing = load_facts(conn, new.isin, [new.concept], new.basis, [period], True)
     if any(_same_input(f, new) for f in existing):
         stats.skipped += 1
         return
@@ -159,7 +159,7 @@ def append_fact(conn: Connection, new: NewFact, settings: Settings, stats: Write
     stats.inserted += 1
     stats.fact_ids.append(fact_id)
     stats.isins.add(new.isin)
-    versions = load_facts(conn, new.isin, [new.concept], new.basis, [period])
+    versions = load_facts(conn, new.isin, [new.concept], new.basis, [period], True)
     stored = next(f for f in versions if f.fact_id == fact_id)
     _record_neighbours(conn, stored, versions, settings, stats)
 

@@ -248,14 +248,121 @@ def test_confirm_errors(kit) -> None:
         confirm_event(other)
 
 
-def test_the_same_event_cannot_be_recorded_twice(kit) -> None:
+def test_a_cluster_already_explained_by_a_recorded_event_is_not_proposed_again(kit) -> None:
+    """The decided item is lost (or the validation re-run): the event still explains the cluster."""
+    first = restated(kit)
+    event_id = confirm_event(first, "accounting_policy_change")
+    with transaction() as conn:
+        conn.execute(sa.delete(tables.review_queue).where(tables.review_queue.c.id == first))
+    assert run_validation(kit.ISIN).proposals == []
+    assert list_items("open", ITEM_EVENT_PROPOSAL) == []
+    assert [e.id for e in recorded_events(kit.ISIN)] == [event_id]
+
+
+def test_another_filing_showing_the_same_restatement_is_attached_to_the_event(kit) -> None:
+    """Netweb: the Q4 FY26 results and, later, the Q2 FY26 results both carry the restated FY25."""
+    first = restated(kit)
+    event_id = confirm_event(first, "accounting_policy_change", citation="Note 5")
+    write(kit, RESTATED_PL, "ocr", scale=10, conf=0.95, filing="FIL-p2")
+    assert run_validation(kit.ISIN).proposals == []  # no second proposal
+    assert list_items("open", ITEM_EVENT_PROPOSAL) == []
+    [event] = recorded_events(kit.ISIN)
+    linked = json.loads(event.details)["linked_filings"]
+    assert [(x["pdf_filing_id"], x["period_end"]) for x in linked] == [("FIL-p2", "2025-03-31")]
+    assert event.id == event_id
+    run_validation(kit.ISIN)  # attaching is idempotent
+    assert len(json.loads(recorded_events(kit.ISIN)[0].details)["linked_filings"]) == 1
+
+
+def test_an_open_proposal_of_the_same_restatement_is_resolved_by_the_event(kit) -> None:
+    write(kit, XBRL_PL, "xbrl", scale=10)
+    write(kit, RESTATED_PL, "ocr", scale=10, conf=0.95)
+    write(kit, RESTATED_PL, "ocr", scale=10, conf=0.95, filing="FIL-p2")
+    proposals = run_validation(kit.ISIN).proposals
+    assert len(proposals) == 2  # no event recorded yet: both filings are proposed
+    confirm_event(proposals[0], "accounting_policy_change")
+    run_validation(kit.ISIN)
+    [resolved] = [i for i in list_items("resolved", ITEM_EVENT_PROPOSAL) if i.id == proposals[1]]
+    assert json.loads(resolved.resolution_json)["how"].startswith("same restatement")
+    assert list_items("open", ITEM_EVENT_PROPOSAL) == []
+
+
+def test_a_pdf_column_filed_under_the_wrong_basis_is_compared_with_the_right_one(kit) -> None:
+    """Gabriel Q1 FY27: the standalone statement printed without a basis word is labelled
+    consolidated; its numbers are the standalone XBRL ones. Not a restatement, no proposal."""
+    write(kit, XBRL_PL, "xbrl", scale=10)  # consolidated
+    write(kit, RESTATED_PL, "xbrl", scale=10, basis="standalone", filing="FIL-xs")
+    write(kit, RESTATED_PL, "ocr", scale=10, conf=0.95)  # labelled consolidated
+    report = run_validation(kit.ISIN)
+    assert report.proposals == []
+    rows = {
+        (r.basis): r for r in report.results if r.rule_id == "xbrl_vs_pdf" and r.period_type == "FY"
+    }
+    assert "consolidated" not in rows  # nothing of the PDF is left to compare on that basis
+    assert rows["standalone"].status is ValidationStatus.PASS
+    assert rows["standalone"].details["basis_corrected"] == [
+        {"pdf_filing": "FIL-p", "labelled": "consolidated", "values_match": "standalone"}
+    ]
+
+
+def test_a_different_restatement_of_the_same_period_is_still_proposed(kit) -> None:
     first = restated(kit)
     confirm_event(first, "accounting_policy_change")
-    with transaction() as conn:  # the decided item is lost, so the next run proposes again
-        conn.execute(sa.delete(tables.review_queue).where(tables.review_queue.c.id == first))
-    [second] = run_validation(kit.ISIN).proposals
+    other = {  # a different restatement that still adds up
+        **RESTATED_PL,
+        "other_expenses": "89.22",
+        "total_expenses": "811.00",
+        "profit_before_tax": "199.00",
+        "profit_after_tax": "151.44",
+    }
+    write(kit, other, "ocr", scale=10, conf=0.95, filing="FIL-p3")
+    assert len(run_validation(kit.ISIN).proposals) == 1
+
+
+def test_link_event_command_closes_a_proposal_by_hand(kit) -> None:
+    item = restated(kit)
+    with transaction() as conn:
+        event_id = conn.execute(
+            sa.insert(tables.corporate_events).values(
+                isin=kit.ISIN,
+                event_type="accounting_policy_change",
+                event_date="2025-04-01",
+                details="{}",
+                source="test",
+            )  # fmt: skip
+        ).inserted_primary_key[0]
+    result = CliRunner().invoke(app, ["review", "link-event", str(item), "--event", str(event_id)])
+    assert result.exit_code == 0 and f"linked to corporate event {event_id}" in result.output
+    [resolved] = list_items("resolved", ITEM_EVENT_PROPOSAL)
+    assert json.loads(resolved.resolution_json)["linked_event"] == event_id
+
+
+def test_confirm_the_same_event_twice_is_refused(kit) -> None:
+    first = restated(kit)
+    confirm_event(first, "accounting_policy_change")
+    with transaction() as conn:  # a proposal for another filing, same effective date
+        other = conn.execute(
+            sa.insert(tables.review_queue).values(
+                item_type=ITEM_EVENT_PROPOSAL,
+                payload_json=json.dumps(
+                    {
+                        "isin": kit.ISIN,
+                        "basis": BASIS,
+                        "filing_id": "FIL-z",
+                        "restated_period_end": "2025-03-31",
+                        "proposed_event_type": "comparative_restatement",
+                        "proposed_event_date": "2025-04-01",
+                        "rule_id": "xbrl_vs_pdf",
+                        "classification": RESTATED,
+                        "affected_keys": [],
+                    }
+                ),
+                occurrences=1,
+                status="open",
+            )  # fmt: skip
+        ).inserted_primary_key[0]
     with pytest.raises(ReviewError, match="already recorded"):
-        confirm_event(second, "accounting_policy_change")
+        confirm_event(other, "accounting_policy_change")
 
 
 # --- patterns and the command line --------------------------------------------------------------

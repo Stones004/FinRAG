@@ -79,6 +79,8 @@ def filing_id_from_sha(sha: str) -> str:
     return f"{PREFIX_FILING}-{sha[:_FILING_HEX_CHARS].lower()}"
 
 
-def chunk_id(filing_id: str, page: int, seq: int) -> str:
-    """Filing ID, page, sequence -> 'CHK-<filing_id>-p<page>-<seq>'."""
-    return f"{PREFIX_CHUNK}-{filing_id}-p{page}-{seq}"
+def chunk_id(filing_id: str, page: int | None, seq: int) -> str:
+    """Filing ID, page (None for an XBRL text block), sequence -> 'CHK-<filing_id>-p<page>-<seq>'
+    or 'CHK-<filing_id>-x-<seq>'."""
+    where = "x" if page is None else f"p{page}"
+    return f"{PREFIX_CHUNK}-{filing_id}-{where}-{seq}"

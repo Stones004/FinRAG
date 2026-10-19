@@ -16,12 +16,14 @@ from finrag.normalize.mapper import Mapper
 from finrag.normalize.runner import (
     NormalizeOutcome,
     _context,
+    apply_usability,
     entity_sector,
     load_rows,
     normalize_facts,
     xbrl_keys,
 )
 from finrag.normalize.taxonomy import Taxonomy, load_taxonomy
+from finrag.normalize.usable import build_usability
 
 STATEMENTS = ("profit_and_loss", "balance_sheet", "cash_flow", "other")
 
@@ -42,6 +44,7 @@ class CoverageReport:
     placeholder_zero: int = 0
     unmapped: Counter[str] = field(default_factory=Counter)  # key -> facts
     issues: Counter[str] = field(default_factory=Counter)
+    not_queued: Counter[str] = field(default_factory=Counter)  # PDF/OCR requests nobody needs
 
     def add(self, out: NormalizeOutcome) -> None:
         """Add one filing's outcome."""
@@ -56,6 +59,7 @@ class CoverageReport:
         self.placeholder_zero += out.placeholder_zero
         self.unmapped.update(u.outcome.key for u in out.unmapped)
         self.issues.update(i.reason for i in out.issues)
+        self.not_queued.update(out.not_queued)
         if out.basis_unknown:
             self.issues["basis_unknown"] += out.basis_unknown
 
@@ -82,14 +86,20 @@ def build_report(
         ).all()
     sector = entity_sector(isin, engine)
     covered = xbrl_keys(isin, mapper, min_confidence, engine)
+    usable = build_usability(isin, covered, settings, engine)
     report = CoverageReport(isin)
     for filing in found:
         rows = load_rows(filing.filing_id, engine)
         if not rows:
             continue  # annual reports and transcripts carry no facts
         ctx = _context(filing, sector, mapper.taxonomy)
-        keys = frozenset() if filing.format == FilingFormat.XBRL.value else covered
-        report.add(normalize_facts(rows, ctx, mapper, min_confidence, keys))
+        is_xbrl = filing.format == FilingFormat.XBRL.value
+        outcome = normalize_facts(
+            rows, ctx, mapper, min_confidence, frozenset() if is_xbrl else covered
+        )
+        if not is_xbrl:
+            apply_usability(outcome, ctx, mapper.taxonomy, usable)
+        report.add(outcome)
     return report
 
 
@@ -122,4 +132,8 @@ def format_report(report: CoverageReport) -> list[str]:
     if report.issues:
         issues = ", ".join(f"{k} {v}" for k, v in sorted(report.issues.items()))
         lines.append(f"issues (would be queued): {issues}")
+    if report.not_queued:
+        lines.append("PDF/OCR requests nobody needs (counted, not queued):")
+        for reason, count in sorted(report.not_queued.items()):
+            lines.append(f"  {reason:<48}{count:>6}")
     return lines

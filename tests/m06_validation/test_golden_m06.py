@@ -14,6 +14,8 @@ import sqlalchemy as sa
 
 from finrag.core.db import tables
 from finrag.core.types import ValidationStatus
+from finrag.facts.current_view import get_facts
+from finrag.facts.gap_gate import evaluate as gate_evaluate
 from finrag.validation.cross_source import OCR_ERROR, RESTATED
 from finrag.validation.engine import evaluate_isin
 from finrag.validation.rules import load_rules
@@ -21,7 +23,11 @@ from finrag.validation.rules import load_rules
 REAL = Path(__file__).resolve().parents[2]
 DB = REAL / "data" / "finrag.db"
 NETWEB, GABRIEL, HDFC = "INE0NT901020", "INE524A01029", "INE040A01034"
-NETWEB_PDF = "FIL-84bf2a7b31af"
+NETWEB_PDF = "FIL-84bf2a7b31af"  # Q4 FY26 results (scan)
+NETWEB_Q2_PDF = "FIL-adc5c2c447ce"  # Q2 FY26 results (scan)
+NETWEB_Q1_FY27_PDF = "FIL-fe39ea35d094"
+GABRIEL_Q2_PDF = "FIL-18d88e93949e"
+HDFC_Q2_PDF, HDFC_Q4_PDF = "FIL-13f40167ba80", "FIL-2d754667c7d5"
 MN = Decimal(1_000_000)
 
 
@@ -60,12 +66,79 @@ def statuses(evaluation, rule_id: str) -> Counter:
     return Counter(r.status for r in evaluation.results if r.rule_id == rule_id)
 
 
+@pytest.fixture(scope="module")
+def gate():
+    """isin -> {(filing, statement, basis, start, end): Column} the gap-fill gate decides."""
+    return {
+        isin: {
+            (c.filing_id, c.statement_type, c.basis, c.period_start, c.period_end): c
+            for c in gate_evaluate(isin, engine=ENGINE)
+        }
+        for isin in (NETWEB, GABRIEL, HDFC)
+    }
+
+
+def would_fill_rejections(gate) -> set[tuple[str, ...]]:
+    """(isin, filing, statement, basis, start, end) of columns whose rejection changes the view."""
+    return {
+        (isin, *key)
+        for isin, columns in gate.items()
+        for key, column in columns.items()
+        if column.changes_current_view
+    }
+
+
 def test_every_balance_sheet_balances_banks_included(evaluations) -> None:
-    assert statuses(evaluations[GABRIEL], "bs_balances") == {ValidationStatus.PASS: 3}
+    # Gabriel: three consolidated XBRL balance sheets and the standalone 31 Mar 2025 comparative
+    # of the Q2 FY26 PDF; its standalone 30 Sep 2025 column is rejected by the gate (below).
+    gabriel = {
+        (r.period_end, r.basis): r
+        for r in evaluations[GABRIEL].results
+        if r.rule_id == "bs_balances"
+    }
+    assert {k: r.status for k, r in gabriel.items()} == dict.fromkeys(
+        [
+            ("2025-03-31", "consolidated"),
+            ("2025-09-30", "consolidated"),
+            ("2026-03-31", "consolidated"),
+            ("2025-03-31", "standalone"),
+        ],
+        ValidationStatus.PASS,
+    )
+    assert gabriel[("2025-03-31", "standalone")].details["sources"] == {
+        "left": "pdf",
+        "right": "pdf",
+    }
     assert statuses(evaluations[NETWEB], "bs_balances") == {ValidationStatus.PASS: 3}
     assert statuses(evaluations[HDFC], "bank_bs_balances") == {
         ValidationStatus.PASS: 6
     }  # 3 x 2 bases
+
+
+def test_gabriel_standalone_h1_fy26_balance_sheet_is_rejected_by_the_gate(gate) -> None:
+    """Q2 FY26 PDF, standalone, 30 Sep 2025: total equity and liabilities is printed 2010572.
+
+    Total assets is 20,105.72 mn; the right side lost its decimal point (a 100x error in the PDF
+    text layer, confidence 0.3). There is no XBRL for the standalone Q2 FY26 balance sheet, so
+    without the gate the PDF totals would be current and the balance-sheet rule would block.
+    """
+    key = (GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-09-30", "2025-09-30")
+    column = gate[GABRIEL][key]
+    facts = {f.concept: f for f in column.facts}
+    assert facts["total_assets"].value == Decimal("20105720000.00")
+    assert facts["total_equity_and_liabilities"].value == Decimal("2010572000000")
+    assert facts["total_equity_and_liabilities"].value / facts["total_assets"].value == 100
+    assert [i["id"] for i in column.identities if i["status"] == "block"] == ["balance_sheet"]
+    assert len(column.rejected) == len(column.facts) == 4 and column.changes_current_view
+    assert "low_confidence" in facts["total_equity_and_liabilities"].reasons
+    assert "column_identity_failed" in facts["total_assets"].reasons  # a good number, bad column
+    assert (
+        not [  # nothing of that column is current
+            f
+            for f in get_facts(GABRIEL, ["total_assets"], None, "standalone", engine=ENGINE)
+            if str(f.period.end) == "2025-09-30"
+        ]
+    )
 
 
 def test_opening_cash_equals_prior_closing_on_real_data(evaluations) -> None:
@@ -86,6 +159,29 @@ def test_opening_cash_equals_prior_closing_on_real_data(evaluations) -> None:
                 assert row.details["missing"] == ["closing_cash"]
 
 
+def test_hdfc_pdf_opening_cash_is_never_current_where_its_date_is_unverifiable(gate) -> None:
+    """HDFC cash-flow headers carry dates only, so the PDF columns have no period start.
+
+    The opening balance was dated at the column end (2,395,706.8 mn "at 30 Sep 2025" against an
+    XBRL closing cash of 1,651,422.7 mn), which blocked the standalone cash lines. That was a
+    date-mapping fault, not an OCR error (M04 now refuses such a balance); the same columns also
+    carry real OCR errors (closing cash 4,651,422.8 for 1,651,422.7; 25633937 without decimals).
+    """
+    refused = {
+        key: sorted({r for f in column.rejected for r in f.reasons})
+        for key, column in gate[HDFC].items()
+        if column.statement_type == "cash_flow" and column.changes_current_view
+    }
+    both = ["low_confidence", "opening_date_unverifiable"]
+    assert refused == {
+        (HDFC_Q2_PDF, "cash_flow", "standalone", "2024-09-30", "2024-09-30"): both,
+        (HDFC_Q2_PDF, "cash_flow", "standalone", "2025-09-30", "2025-09-30"): both,
+        (HDFC_Q4_PDF, "cash_flow", "standalone", "2026-03-31", "2026-03-31"): both,
+    }
+    current = get_facts(HDFC, ["opening_cash"], None, "standalone", engine=ENGINE)
+    assert current and {f.source_class.value for f in current} == {"xbrl"}
+
+
 def test_income_sums_hold_on_real_data(evaluations) -> None:
     for isin, rule in (
         (GABRIEL, "pl_total_income"),
@@ -93,13 +189,46 @@ def test_income_sums_hold_on_real_data(evaluations) -> None:
         (HDFC, "bank_pl_total_income"),
     ):
         found = statuses(evaluations[isin], rule)
-        assert set(found) == {ValidationStatus.PASS}, (isin, found)
-        assert sum(found.values()) >= 9
+        assert set(found) <= {ValidationStatus.PASS, ValidationStatus.SKIP}, (isin, found)
+        assert found[ValidationStatus.PASS] >= 9
+    # A skip is a period whose PDF comparative column carries no total income line (the Q2 FY25 and
+    # H1 FY25 columns of the Q2 FY26 results PDF, and H2 FY25 derived from them): nothing is wrong.
+    skipped = {
+        (r.period_type, r.period_end): r.details["missing"]
+        for r in evaluations[NETWEB].results
+        if r.rule_id == "pl_total_income" and r.status is ValidationStatus.SKIP
+    }
+    assert skipped == dict.fromkeys(
+        [("Q", "2024-09-30"), ("H", "2024-09-30"), ("H", "2025-03-31")], ["total_income"]
+    )
+    assert statuses(evaluations[GABRIEL], "pl_total_income") == {ValidationStatus.PASS: 9}
 
 
-def test_nothing_in_the_real_data_is_blocked(evaluations) -> None:
+def test_nothing_current_is_blocked_and_the_columns_that_would_have_blocked_are_rejected(
+    evaluations, gate
+) -> None:
+    """Without the gate, Gabriel standalone H1 FY26 balance sheet and three HDFC cash-flow columns
+    blocked their rules. They are rejected; every other PDF/OCR column that would have filled a
+    gap is listed with its cause."""
     for evaluation in evaluations.values():
         assert not [r for r in evaluation.results if r.status is ValidationStatus.BLOCK]
+    pl = "profit_and_loss"
+    assert would_fill_rejections(gate) == {
+        # an OCR decimal slip in the column (identity failed): profit 30,479 for 304.79 (100x)
+        (NETWEB, NETWEB_Q2_PDF, pl, "standalone", "2025-04-01", "2025-06-30"),
+        # a text-layer decimal slip: total equity and liabilities 2010572 for 20,105.72 (100x)
+        (GABRIEL, GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-09-30", "2025-09-30"),
+        # date unverifiable + low-confidence OCR (see the HDFC test)
+        (HDFC, HDFC_Q2_PDF, "cash_flow", "standalone", "2024-09-30", "2024-09-30"),
+        (HDFC, HDFC_Q2_PDF, "cash_flow", "standalone", "2025-09-30", "2025-09-30"),
+        (HDFC, HDFC_Q4_PDF, "cash_flow", "standalone", "2026-03-31", "2026-03-31"),
+        # PDF-only values below parsing.pdf.min_table_confidence (columns that add up)
+        (HDFC, "FIL-d4dbfc854227", pl, "standalone", "2025-04-01", "2025-06-30"),
+        (HDFC, HDFC_Q4_PDF, pl, "consolidated", "2025-10-01", "2025-12-31"),
+        (GABRIEL, "FIL-133dad08692c", pl, "standalone", "2024-04-01", "2025-03-31"),
+        (GABRIEL, GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-03-31", "2025-03-31"),
+        (GABRIEL, GABRIEL_Q2_PDF, pl, "consolidated", "2024-10-01", "2025-03-31"),
+    }
 
 
 def test_gabriel_cash_flow_differs_from_balance_sheet_cash(evaluations) -> None:
@@ -108,7 +237,18 @@ def test_gabriel_cash_flow_differs_from_balance_sheet_cash(evaluations) -> None:
     gaps = {k: Decimal(v.details["abs_diff"]) / MN for k, v in rows.items()}
     expected = {"2025-03-31": "38.65", "2025-09-30": "34.41", "2026-03-31": "15.08"}
     assert gaps == {k: Decimal(v) for k, v in expected.items()}
-    assert statuses(evaluations[NETWEB], "cash_ties_to_bs") == {ValidationStatus.PASS: 3}
+    # Netweb ties exactly at its three XBRL dates; the fourth result is a skip: the H1 FY25 closing
+    # cash of the Q2 FY26 PDF (30 Sep 2024) has no balance-sheet cash to compare with.
+    netweb = {
+        r.period_end: r for r in evaluations[NETWEB].results if r.rule_id == "cash_ties_to_bs"
+    }
+    assert {k: v.status for k, v in netweb.items()} == {
+        "2024-09-30": ValidationStatus.SKIP,
+        "2025-03-31": ValidationStatus.PASS,
+        "2025-09-30": ValidationStatus.PASS,
+        "2026-03-31": ValidationStatus.PASS,
+    }
+    assert netweb["2024-09-30"].details["missing"] == ["cash_and_equivalents"]
 
 
 def netweb_rows(evaluations):
@@ -123,17 +263,32 @@ def test_netweb_cross_source_findings(evaluations) -> None:
         "total_assets", "total_equity_and_liabilities", "total_equity", "other_equity",
         "total_current_assets",
     }  # fmt: skip
-    assert warned[("2026-03-31", "Q")].details["concepts"] == ["profit_before_tax"]
+    # two OCR errors, one in each PDF that carries the Q4 FY26 column (see the OCR-error test)
+    assert warned[("2026-03-31", "Q")].details["concepts"] == ["finance_cost", "profit_before_tax"]
 
 
 def test_netweb_fy25_is_a_restated_comparative(evaluations) -> None:
-    found = [  # the one cluster is shown on every row (FY, Q, INSTANT) it touches
-        c
+    """The inventory-valuation change (corporate event 1) shows in two PDFs: the Q4 FY26 results
+    restate FY25 (P&L, Q4 FY25 and balance sheet, 21 lines) and the Q2 FY26 results already
+    restate the FY25 year column (5 lines). Both are genuine restated comparatives."""
+    clusters = [
+        (r.period_type, c)
         for r in netweb_rows(evaluations)
         for c in r.details.get("clusters", [])
         if c["classification"] == RESTATED
     ]
+    by_filing: dict[str, list] = {}
+    for kind, c in clusters:
+        by_filing.setdefault(c["pdf_filing"], []).append((kind, c))
+    assert set(by_filing) == {NETWEB_PDF, NETWEB_Q2_PDF}
+    found = [
+        c for _, c in by_filing[NETWEB_PDF]
+    ]  # the one cluster is shown on every row it touches
     assert len(found) == 3 and all(c == found[0] for c in found)
+    ((q2_kind, q2),) = by_filing[NETWEB_Q2_PDF]
+    assert (q2_kind, q2["period_end"], q2["differing_keys"], q2["periods_affected"]) == (
+        "FY", "2025-03-31", 5, ["FY"],
+    )  # fmt: skip
     cluster = found[0]
     assert (cluster["pdf_filing"], cluster["period_end"], cluster["differing_keys"]) == (
         NETWEB_PDF, "2025-03-31", 21,
@@ -158,20 +313,42 @@ def test_netweb_fy25_is_a_restated_comparative(evaluations) -> None:
         Decimal("1144.75"),
         Decimal("1137.51"),
     )
-    assert [(c.pdf_filing_id, str(c.period_end)) for _, c, _ in evaluations[NETWEB].restated] == [
-        (NETWEB_PDF, "2025-03-31")
-    ]
+    assert {(c.pdf_filing_id, str(c.period_end)) for _, c, _ in evaluations[NETWEB].restated} == {
+        (NETWEB_PDF, "2025-03-31"),
+        (NETWEB_Q2_PDF, "2025-03-31"),
+    }
 
 
-def test_netweb_q4_fy26_pbt_is_an_ocr_error(evaluations) -> None:
+def test_netweb_q4_fy26_has_two_ocr_errors_in_two_pdfs(evaluations) -> None:
+    """Q4 FY26 (quarter to 31 Mar 2026) read twice: in its own results scan, profit before tax
+    94,822 for 948.22; in the Q1 FY27 results (comparative column), finance cost 8,153 for 81.53
+    (both 100x, confidence 0.3). XBRL has both right; neither OCR value is current."""
     row = next(
         r for r in netweb_rows(evaluations) if (r.period_end, r.period_type) == ("2026-03-31", "Q")
     )
-    [cluster] = row.details["clusters"]
-    assert cluster["classification"] == OCR_ERROR and cluster["differing_keys"] == 1
-    [diff] = row.details["differences"]
-    assert (Decimal(diff["xbrl"]), Decimal(diff["pdf"])) == (
+    clusters = {c["pdf_filing"]: c for c in row.details["clusters"]}
+    assert set(clusters) == {NETWEB_PDF, NETWEB_Q1_FY27_PDF}
+    assert all(
+        c["classification"] == OCR_ERROR and c["differing_keys"] == 1 for c in clusters.values()
+    )
+    diffs = {d["concept"]: d for d in row.details["differences"] if d["beyond_tolerance"]}
+    assert set(diffs) == {"profit_before_tax", "finance_cost"}
+    pbt, fin = diffs["profit_before_tax"], diffs["finance_cost"]
+    assert (Decimal(pbt["xbrl"]), Decimal(pbt["pdf"])) == (
         Decimal(948_220_000),
         Decimal(94_822_000_000),
     )
-    assert set(diff["signals"]) == {"decimal_shift", "low_confidence"}
+    assert (Decimal(fin["xbrl"]), Decimal(fin["pdf"])) == (
+        Decimal(81_530_000),
+        Decimal(8_153_000_000),
+    )
+    for diff in diffs.values():
+        assert set(diff["signals"]) == {"decimal_shift", "low_confidence"}
+    current = {
+        f.concept: f
+        for f in get_facts(
+            NETWEB, ["profit_before_tax", "finance_cost"], None, "standalone", engine=ENGINE
+        )
+        if str(f.period.end) == "2026-03-31" and f.period.type.value == "Q"
+    }
+    assert {c: f.source_class.value for c, f in current.items()} == dict.fromkeys(diffs, "xbrl")

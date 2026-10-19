@@ -115,7 +115,9 @@ def test_netweb_quarantined_originals_contribute_nothing() -> None:
 
 def test_netweb_xbrl_wins_over_pdf_for_q4_fy26() -> None:
     with ENGINE.connect() as conn:
-        facts = load_facts(conn, NETWEB, None, "standalone")
+        # every stored version, including PDF/OCR ones the gap-fill gate refuses: precedence is
+        # about which of the versions is current, whatever the gate says about the weaker ones
+        facts = load_facts(conn, NETWEB, None, "standalone", include_rejected=True)
     by_key: dict[tuple, list] = {}
     for f in facts:
         by_key.setdefault((f.concept, f.period.start, f.period.end), []).append(f)

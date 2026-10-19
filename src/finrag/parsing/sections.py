@@ -36,8 +36,19 @@ class TableLabels(_Section):
     continuation_words: list[str]
 
 
+class ColumnCheck(_Section):
+    """One sum check inside a statement column: total = parts + optional parts - minus."""
+
+    id: str
+    statement: str
+    total: list[str]
+    parts: list[list[str]]
+    minus: list[list[str]] = []
+    optional_parts: list[list[str]] = []
+
+
 class SectionsRegistry(_Section):
-    """statement_pages, basis_patterns, unit_patterns, table_header, financial_terms."""
+    """statement_pages, basis_patterns, unit_patterns, table_header, financial_terms, checks."""
 
     statement_pages: dict[str, list[str]]
     basis_patterns: dict[str, list[str]]
@@ -45,6 +56,7 @@ class SectionsRegistry(_Section):
     table_header: TableHeader
     table_labels: TableLabels
     financial_terms: list[str]
+    column_checks: list[ColumnCheck] = []
 
     @field_validator("statement_pages", "basis_patterns", "unit_patterns")
     @classmethod
@@ -54,6 +66,21 @@ class SectionsRegistry(_Section):
             for pattern in patterns:
                 re.compile(pattern)
         return value
+
+
+Row = list[re.Pattern[str]]  # label regexes of one row, in priority order
+
+
+@dataclass(frozen=True)
+class CompiledColumnCheck:
+    """A column check with its row labels compiled."""
+
+    id: str
+    statement: str
+    total: Row
+    parts: list[Row]
+    minus: list[Row]
+    optional_parts: list[Row]
 
 
 @dataclass(frozen=True)
@@ -68,11 +95,29 @@ class SectionPatterns:
     months_in_kind: dict[PeriodType, int]
     continuation_words: frozenset[str]
     financial_terms: frozenset[str]
+    column_checks: list[CompiledColumnCheck]
 
 
 def _compile_all(groups: dict[str, list[str]]) -> dict[str, list[re.Pattern[str]]]:
     """key -> patterns, compiled case-insensitively."""
     return {k: [re.compile(p, re.IGNORECASE) for p in v] for k, v in groups.items()}
+
+
+def _row(patterns: list[str]) -> Row:
+    """Label regexes of one row -> compiled, case-insensitive."""
+    return [re.compile(p, re.IGNORECASE) for p in patterns]
+
+
+def _compile_check(check: ColumnCheck) -> CompiledColumnCheck:
+    """A registry column check -> compiled row patterns."""
+    return CompiledColumnCheck(
+        id=check.id,
+        statement=check.statement,
+        total=_row(check.total),
+        parts=[_row(p) for p in check.parts],
+        minus=[_row(p) for p in check.minus],
+        optional_parts=[_row(p) for p in check.optional_parts],
+    )
 
 
 def load_section_patterns(settings: Settings | None = None) -> SectionPatterns:
@@ -102,4 +147,5 @@ def load_section_patterns(settings: Settings | None = None) -> SectionPatterns:
         months_in_kind=dict(header.months_in_kind),
         continuation_words=frozenset(w.lower() for w in registry.table_labels.continuation_words),
         financial_terms=frozenset(t.lower() for t in registry.financial_terms),
+        column_checks=[_compile_check(c) for c in registry.column_checks],
     )

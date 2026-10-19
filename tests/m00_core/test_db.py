@@ -83,7 +83,7 @@ def test_version_1_database_is_upgraded_in_place() -> None:
     assert {"dimensions_json", "statement_type"} <= columns
     with transaction() as conn:
         version = conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
-        assert version == SCHEMA_VERSION == 5
+        assert version == SCHEMA_VERSION == 6
         row = conn.execute(sa.select(tables.parsed_facts)).one()
     assert (row.filing_id, row.concept_raw, row.value, row.dimensions_json, row.statement_type) == (
         "FIL-x",
@@ -186,3 +186,34 @@ def test_version_4_database_gets_metric_details() -> None:
     with transaction() as conn:
         row = conn.execute(sa.select(tables.metric_values)).one()
     assert (row.metric_value_id, row.value, row.details_json) == ("MET-1", "0.5", None)
+
+
+def test_version_5_database_gets_chunk_period_and_meta() -> None:
+    """A v5 chunks table (no period or meta columns) is upgraded in place; rows are untouched."""
+    import sqlite3
+
+    from finrag.core.config import get_settings
+    from finrag.core.db import reset_engines
+
+    init_db()
+    path = get_settings().paths.db
+    get_engine().dispose()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP TABLE chunks")
+        conn.execute(
+            "CREATE TABLE chunks (chunk_id TEXT PRIMARY KEY, filing_id TEXT NOT NULL, isin TEXT, "
+            "fiscal_year TEXT, section TEXT, source_type TEXT, speaker TEXT, speaker_role TEXT, "
+            "page INTEGER, seq INTEGER, text TEXT, token_count INTEGER, created_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO chunks (chunk_id, filing_id, text) VALUES ('CHK-1', 'FIL-x', 't')"
+        )
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version VALUES (5, '2026-10-13T00:00:00+00:00')")
+    reset_engines()
+    init_db()
+    columns = {c["name"] for c in sa.inspect(get_engine()).get_columns("chunks")}
+    assert {"period_start", "period_end", "period_type", "meta_json"} <= columns
+    with transaction() as conn:
+        row = conn.execute(sa.select(tables.chunks)).one()
+    assert (row.chunk_id, row.text, row.period_end, row.meta_json) == ("CHK-1", "t", None, None)

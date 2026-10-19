@@ -1,0 +1,28 @@
+# Retrieval eval on the synthetic corpus (acceptance 8). Each case: a question, the company, the
+# filters, and a phrase that must appear in at least one of the top-k hits. The mock embedder returns
+# random vectors, so these cases measure the keyword leg and the filters; the paraphrase test
+# (marked slow) uses the real model.
+k: 5
+min_recall: 1.0
+cases:
+  - question: "will gross margin recover next year as strategic orders complete"
+    isin: INE111A01010
+    periods: ["Q4 FY26"]
+    expect_contains: "Gross margin fell because of mix"
+  - question: "dividend per share recommended by the Board"
+    isin: INE111A01010
+    periods: ["Q4 FY26"]
+    source_types: [transcript]
+    expect_contains: "dividend of INR 3 per share"
+  - question: "effective tax rate going forward"
+    isin: INE111A01010
+    periods: ["Q1 FY27"]
+    expect_contains: "effective tax rate of 25 percent"
+  - question: "change in inventory valuation method"
+    isin: INE111A01010
+    source_types: [results]
+    expect_contains: "inventory valuation method"
+  - question: "which concept described the segment note single segment computing systems"
+    isin: INE111A01010
+    sections: [segment_notes]
+    expect_contains: "single segment"

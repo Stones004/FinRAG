@@ -62,6 +62,7 @@ class PeriodResolution:
         default_factory=list
     )  # named periods that end after the latest filed
     latest_filed: Period | None = None  # the company's latest period with any data
+    transcript_default: bool = False  # the default period is the latest one with a transcript
 
 
 def describe_period(period: Period) -> str:
@@ -174,8 +175,14 @@ def resolve_periods(
     settings: QuerySettings,
     today: date,
     forward: bool = False,
+    transcript_default: bool = False,
 ) -> PeriodResolution:
     """Mentions -> periods against today and the stored data (see the module docstring).
+
+    No period named: the latest period with data, except for a management or narrative question
+    (`transcript_default`), which takes the latest period that has a transcript - what management
+    said exists only for the calls held - and falls back to the latest with data when the company
+    has no transcript at all.
 
     A named period that ends after the company's latest filed period is not evidence: it goes to
     `future` (the caller refuses it, or, for a forward-looking question, treats it as the horizon).
@@ -226,9 +233,13 @@ def resolve_periods(
             )
     if not out.periods and (forward or not out.future):
         latest = avail.latest(isin, metric_ids, concept_ids)
+        called = avail.latest_transcript(isin) if transcript_default else None
         out.defaulted = True
         out.confidence = cap.default_period_confidence
-        if latest is None:
+        if called is not None:
+            out.periods.append(called)
+            out.transcript_default = True
+        elif latest is None:
             out.notes.append("no filed data was found for this company")
         else:
             out.periods.append(latest)

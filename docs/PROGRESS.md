@@ -314,6 +314,39 @@ Three questions were run live (`query_log`: Gabriel Q1 FY27 PAT jump, HDFC manag
 - **Finding about the transcript chunks (not fixed):** the M08 Q&A chunks are labelled `analyst` because the chunk starts with the analyst's question, but the same chunk also contains the management answer ("Answer (Srinivasan Vaidyanathan, Chief Financial Officer): ..."). So restricting to management turns drops all Q&A answers (only prepared and closing remarks remain), and an answer quoted from a Q&A chunk can only be attributed to "an analyst". The right fix is to chunk Q&A by turn in M08; that needs your approval.
 - **Routing set:** now 73 cases (23 held out): tuning 50/50, held-out 23/23, wrong-confident 0.
 
+### Inbox of 17 XBRL files, page basis from the heading, re-parse of 5 PDFs (2026-10-20)
+Backups: `data/finrag.db.bak-2026-10-20-pre-inbox17`, `data/indexes.bak-2026-10-20-pre-inbox17`
+(`finrag.db.run1-superseded` is a first run that was thrown away: it used column kinds that swapped the
+quarter and year columns of the Q4 PDFs; the second run uses the fixed code).
+* **Page basis:** a statement page's own title (`basis_title_patterns` in `sections.yaml`, looked for in
+  every line because the text layer of Gabriel's PDFs lists the title block last) beats the filing's label;
+  no title: the filing's label. Gabriel's Q4 PDFs hold both statements: their standalone pages (2-4) had
+  been stored as consolidated. Review item #763 (ignored) was right that page 4 of the Q1 FY27 PDF is the
+  standalone statement but wrong that "its heading names no basis"; with the fix standalone XBRL and the
+  PDF agree on all 10 compared keys.
+* **Re-parse of normalized PDFs** needs the status reset to `fetched` and the `parsed_fact_id` of the
+  canonical PDF rows cleared (42 rows; foreign key); stale canonical PDF rows stay (append-only) and are
+  superseded key by key.
+* **Netweb Q3 FY25 file** is an Integrated Governance report (board and committee composition), not a
+  results filing: ingestion now quarantines a `financial_results` XBRL whose taxonomy family is `other`
+  (`document_kind` conflict); the filing was quarantined by hand with the same payload.
+* **Restatement rule:** a per-share/ratio fact that was 0 and is filled in by a revision is recorded but
+  not flagged (Gabriel Q1 FY26 standalone rev1: EPS 0 -> 3.88).
+* **Open finding:** HDFC standalone opening cash of H1 FY27 (2,984,663.6 mn) differs from the FY26
+  closing cash (2,976,068.4 mn) in two XBRL filings: `opening_cash_equals_prior_closing` blocks it.
+* **Open finding:** "latest period with data" for HDFC is now Q2 FY27 (results, no call): a management
+  question with no period is answered from results text. Gabriel's year-on-year growth compares with the
+  pre-scheme original (see the design note on `pdf_comparative`).
+
+### PDF comparatives, the Scheme as an event, growth on both bases, transcript default (2026-10-20)
+Backups: `data/finrag.db.bak-2026-10-20-pre-pdfcomp`, `data/indexes.bak-2026-10-20-pre-pdfcomp`.
+* **Citation check:** the `[F]` source lines were already right in the program (`build_citations` reads each alias's own record); the swapped labels in the earlier report came from a mis-pasted block (the stored output was correct). A test now writes two bases in one answer, in both orders, and checks id and basis per alias.
+* **`pdf_comparative`** as designed, with the user's conditions: native-text PDF only (a scan never), comparatives never beat the original, disagreements with an original go to the review queue (`comparative_disagreement`), an event only if the filing's own note explains it or the identities hold. See the M05/M06/M07/M09 specs.
+* **Label "Net Profit after tax" mapped** to `profit_after_tax` (it was a known-unmapped label since an FY25 OCR cell read 211867 for 2118.67; the gap gate now rejects that cell by confidence). 21 new canonical PDF facts, no change to any current value.
+* **Event 2** (comparative_restatement, 2026-04-01, standalone and consolidated): Gabriel's Composite Scheme of Arrangement; proposals 859, 861, 862, 863 resolved; #864 and #865 (`comparative_disagreement`) open.
+* **Growth** shows both bases (Gabriel Q1 FY27 PAT: 74.48% against the 619.72 mn first filed, 2.53% against the 1,054.53 mn restated; standalone 36.46% and 27.44%).
+* **Management/narrative questions with no period** take the latest period with a transcript.
+
 ### M03 follow-up (2026-10-20): PDF column periods, ghost spaces, tight columns
 Found on Gabriel's Q1 FY27 results PDF: the comparative quarter column came out as `2024-07-01..2025-06-30` (nearest header label was "Year ended", and a 31 March/30 June date was never checked against the type), numbers were cut in two by space glyphs lying over their first digits (`10,716.81` stored as `716.81`), and the consolidated statement page was "no numeric columns found" (four columns 36 pt apart chained into one by stray edges, plus noise columns the documented support ratio never removed). Fixes: `kind_fits` (the nearest header label that makes a real fiscal period of the date wins), `_distinct` (no two columns the same period), `ghost_spaces` (dropped before words are built), `_split_wide` and the support-ratio floor in `find_columns`, and a first data row that must lie below the line carrying the dates. Effect over the 12 stored results PDFs: 5 change, 18 table pages; 127 fact periods and 262 values corrected, 666 facts gained, 48 broken ones gone; tables read 14 to 22, unread pages 14 to 6. Stored parsed facts are not yet re-parsed: run `finrag parse` for the affected filings and re-run normalisation to pick the corrections up.
 

@@ -374,7 +374,10 @@ class QueryService:
             if c.kind == "metric":
                 what = f"metric {d['metric_id']}, period ending {d['period_end']}, {d['basis']}"
             elif c.kind == "fact":
-                what = f"fact {d['concept']}, filing {d['filing_id']}, filed {d['filed_on']}"
+                filed = d["filed_on"] or "date not recorded"
+                what = f"fact {d['concept']}, filing {d['filing_id']}, filed {filed}"
+                if d.get("comparative_in"):
+                    what += f", comparative column of the results to {d['comparative_in']}"
             else:
                 what = f"{d['header']}; filing {d['filing_id']}"
             lines.append(f"- [{c.alias}] {c.id} ({what})")

@@ -124,6 +124,7 @@ class IntentParser:
             self.query,
             today,
             forward=kind.forward,
+            transcript_default=kind.management or kind.question_type == "narrative",
         )
         if resolved.future and not kind.forward:
             return self._period_clarification(question, entity, resolved)
@@ -293,6 +294,7 @@ class IntentParser:
             for d in (
                 "entity" if entity_defaulted else None,
                 "period" if resolved.defaulted else None,
+                "period_transcript" if resolved.transcript_default else None,
                 f"basis:{basis_note}" if basis_note and basis_note != "named" else None,
                 "question_type" if not kind.matched else None,
             )
@@ -392,7 +394,12 @@ class IntentParser:
         line = "Reading your question as: " + " — ".join(parts) + "."
         for note in intent.notes:
             line += f" {note}."
-        if "period" in intent.defaults_applied and not intent.forward_looking:
+        if "period_transcript" in intent.defaults_applied:
+            line += (
+                " No period was named, so the latest period with an earnings-call transcript "
+                "is used."
+            )
+        elif "period" in intent.defaults_applied and not intent.forward_looking:
             line += " No period was named, so the latest with data is shown."
         if intent.decision == CONFIRM:
             line += " Is this right?"

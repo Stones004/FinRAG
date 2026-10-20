@@ -30,6 +30,10 @@ class Availability(Protocol):
         """The latest period with data for these metrics/concepts (all data if none are given)."""
         ...
 
+    def latest_transcript(self, isin: str) -> Period | None:
+        """The latest period with an indexed earnings-call transcript (None: no transcript)."""
+        ...
+
 
 def _rank(period: Period) -> tuple[date, int]:
     """Sort key: later end first, then the preferred type."""
@@ -95,6 +99,18 @@ class DbAvailability:
                 found += self._periods(conn.execute(query.distinct()))
         return best_period(found)
 
+    def latest_transcript(self, isin: str) -> Period | None:
+        """The latest period of the company's indexed transcript passages."""
+        c = tables.chunks
+        query = sa.select(c.c.period_start, c.c.period_end, c.c.period_type).where(
+            c.c.isin == isin,
+            c.c.source_type == "transcript",
+            c.c.period_start.is_not(None),
+            c.c.period_end.is_not(None),
+        )
+        with transaction(self._engine) as conn:
+            return best_period(self._periods(conn.execute(query.distinct())))
+
     @staticmethod
     def _periods(rows: Iterable[sa.Row]) -> list[Period]:
         """Rows -> duration periods (a balance-sheet date becomes the period ending on it)."""
@@ -118,9 +134,19 @@ class DbAvailability:
 class StubAvailability:
     """Availability from a fixed list of periods (tests and the offline routing run)."""
 
-    def __init__(self, periods: Iterable[Period], by_metric: dict[str, list[Period]] | None = None):
+    def __init__(
+        self,
+        periods: Iterable[Period],
+        by_metric: dict[str, list[Period]] | None = None,
+        transcripts: Iterable[Period] = (),
+    ):
         self.periods = list(periods)
         self.by_metric = by_metric or {}
+        self.transcripts = list(transcripts)
+
+    def latest_transcript(self, isin: str) -> Period | None:
+        """Latest listed transcript period (None when the stub lists none)."""
+        return best_period(self.transcripts)
 
     def has_period(self, isin: str, period: Period) -> bool:
         """True if the period is in the list."""

@@ -148,7 +148,7 @@ concepts:
     xbrl_concepts:
       indas: ["in-capmkt:ProfitLossForPeriod"]
       banking: ["in-capmkt:ProfitLossForThePeriod"]
-    labels: ["Profit for the period / year"]
+    labels: ["Profit for the period / year", "Net Profit after tax"]
   profit_continuing_ops:
     label: Profit for the period from continuing operations
     statement: profit_and_loss
@@ -605,12 +605,15 @@ known_unmapped:
     "in-capmkt:CurrentFinancialLiabilities": "balance_sheet_item"
     "in-capmkt:CurrentTaxAssets": "balance_sheet_item"
     "in-capmkt:CurrentTaxLiabilities": "balance_sheet_item"
+    "in-capmkt:DebtEquityRatio": "ratio"
+    "in-capmkt:DebtServiceCoverageRatio": "ratio"
     "in-capmkt:DeferredGovernmentGrantsCurrent": "balance_sheet_item"
     "in-capmkt:DeferredGovernmentGrantsNoncurrent": "balance_sheet_item"
     "in-capmkt:DeferredTaxAssetsNet": "balance_sheet_item"
     "in-capmkt:DeferredTaxLiabilitiesNet": "balance_sheet_item"
     "in-capmkt:EquityAttributableToOwnersOfParent": "balance_sheet_item"
     "in-capmkt:IntangibleAssetsUnderDevelopment": "balance_sheet_item"
+    "in-capmkt:InterestServiceCoverageRatio": "ratio"
     "in-capmkt:InvestmentProperty": "balance_sheet_item"
     "in-capmkt:InvestmentsAccountedForUsingEquityMethod": "balance_sheet_item"
     "in-capmkt:LiabilitiesDirectlyAssociatedWithAssetsInDisposalGroupClassifiedAsHeldForSale": "balance_sheet_item"
@@ -876,7 +879,6 @@ known_unmapped_labels:
     "purchases of stock in trade": { reason: income_statement_item, note: "NOT mapped to purchases_stock_in_trade from the PDF: a comparative column with no XBRL value to match" }
     "changes in inventories of finished goods work in progress and stock in trade": { reason: income_statement_item, note: "NOT mapped to change_in_inventories from the PDF: a comparative column with no XBRL value to match" }
     "reserves and surplus": { reason: balance_sheet_item, note: "footer of the P&L page, dated as a duration; the balance-sheet line is other_equity" }
-    "net profit after tax": { reason: income_statement_item, note: "equals profit_after_tax (PBT less tax holds in the FY24 column) but NOT mapped yet: mapping it brings in the FY25 cell read as 211867 for 2118.67, which fails the PAT identity and would reject seven good cells of that column; revisit after the M03b run" }
   balance_sheet:
     "right of use assets": balance_sheet_item
     "intangible assets under development financial assets investments": { reason: ocr_merged_label, note: "section header merged into the line; value equals XBRL IntangibleAssetsUnderDevelopment" }

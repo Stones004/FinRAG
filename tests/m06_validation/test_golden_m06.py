@@ -5,6 +5,7 @@ The real database is opened read-only; `evaluate_isin` reads and returns, it wri
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from decimal import Decimal
 from pathlib import Path
@@ -28,6 +29,7 @@ NETWEB_Q2_PDF = "FIL-adc5c2c447ce"  # Q2 FY26 results (scan)
 NETWEB_Q1_FY27_PDF = "FIL-fe39ea35d094"
 GABRIEL_Q2_PDF = "FIL-18d88e93949e"
 HDFC_Q2_PDF, HDFC_Q4_PDF = "FIL-13f40167ba80", "FIL-2d754667c7d5"
+HDFC_Q4_FY25_PDF = "FIL-771ea082ef81"
 MN = Decimal(1_000_000)
 
 
@@ -89,8 +91,8 @@ def would_fill_rejections(gate) -> set[tuple[str, ...]]:
 
 
 def test_every_balance_sheet_balances_banks_included(evaluations) -> None:
-    # Gabriel: three consolidated XBRL balance sheets and the standalone 31 Mar 2025 comparative
-    # of the Q2 FY26 PDF; its standalone 30 Sep 2025 column is rejected by the gate (below).
+    # Gabriel: six XBRL balance sheets (three dates, both bases; the standalone ones came with the
+    # inbox of 2026-10-20, before that the standalone comparatives were PDF text).
     gabriel = {
         (r.period_end, r.basis): r
         for r in evaluations[GABRIEL].results
@@ -102,56 +104,63 @@ def test_every_balance_sheet_balances_banks_included(evaluations) -> None:
             ("2025-09-30", "consolidated"),
             ("2026-03-31", "consolidated"),
             ("2025-03-31", "standalone"),
+            ("2025-09-30", "standalone"),
+            ("2026-03-31", "standalone"),
         ],
         ValidationStatus.PASS,
     )
-    assert gabriel[("2025-03-31", "standalone")].details["sources"] == {
-        "left": "pdf",
-        "right": "pdf",
-    }
+    assert all(r.details["sources"] == {"left": "xbrl", "right": "xbrl"} for r in gabriel.values())
     assert statuses(evaluations[NETWEB], "bs_balances") == {ValidationStatus.PASS: 3}
     assert statuses(evaluations[HDFC], "bank_bs_balances") == {
-        ValidationStatus.PASS: 6
-    }  # 3 x 2 bases
+        ValidationStatus.PASS: 8
+    }  # 4 dates (to Sep 2026) x 2 bases
 
 
-def test_gabriel_standalone_h1_fy26_balance_sheet_is_rejected_by_the_gate(gate) -> None:
+def test_gabriel_standalone_h1_fy26_pdf_balance_sheet_is_no_longer_needed_and_never_current(
+    gate,
+) -> None:
     """Q2 FY26 PDF, standalone, 30 Sep 2025: total equity and liabilities is printed 2010572.
 
     Total assets is 20,105.72 mn; the right side lost its decimal point (a 100x error in the PDF
-    text layer, confidence 0.3). There is no XBRL for the standalone Q2 FY26 balance sheet, so
-    without the gate the PDF totals would be current and the balance-sheet rule would block.
+    text layer). Until the standalone Q2 FY26 XBRL was added the PDF totals would have been
+    current and the balance-sheet rule would have blocked, so the gate rejected the column. The
+    XBRL now supplies the balance sheet: the column no longer changes the current view, and the
+    current facts are the filed XBRL ones (which balance).
     """
-    key = (GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-09-30", "2025-09-30")
-    column = gate[GABRIEL][key]
-    facts = {f.concept: f for f in column.facts}
-    assert facts["total_assets"].value == Decimal("20105720000.00")
-    assert facts["total_equity_and_liabilities"].value == Decimal("2010572000000")
-    assert facts["total_equity_and_liabilities"].value / facts["total_assets"].value == 100
-    assert [i["id"] for i in column.identities if i["status"] == "block"] == ["balance_sheet"]
-    assert len(column.rejected) == len(column.facts) == 4 and column.changes_current_view
-    assert "low_confidence" in facts["total_equity_and_liabilities"].reasons
-    assert "column_identity_failed" in facts["total_assets"].reasons  # a good number, bad column
-    assert (
-        not [  # nothing of that column is current
-            f
-            for f in get_facts(GABRIEL, ["total_assets"], None, "standalone", engine=ENGINE)
-            if str(f.period.end) == "2025-09-30"
-        ]
-    )
+    changing = [
+        key
+        for key, column in gate[GABRIEL].items()
+        if column.changes_current_view and key[0] == GABRIEL_Q2_PDF and key[1] == "balance_sheet"
+    ]
+    assert changing == []
+    current = {
+        f.concept: f
+        for f in get_facts(GABRIEL, ["total_assets", "total_equity_and_liabilities"], None,
+                           "standalone", engine=ENGINE)
+        if str(f.period.end) == "2025-09-30"
+    }  # fmt: skip
+    assert set(current) == {"total_assets", "total_equity_and_liabilities"}
+    assert all(f.source_class.value == "xbrl" for f in current.values())
+    assert current["total_assets"].value == current["total_equity_and_liabilities"].value
 
 
 def test_opening_cash_equals_prior_closing_on_real_data(evaluations) -> None:
     rule = "opening_cash_equals_prior_closing"
     assert statuses(evaluations[GABRIEL], rule) == {
-        ValidationStatus.PASS: 1,
-        ValidationStatus.SKIP: 1,
+        ValidationStatus.PASS: 2,  # both bases
+        ValidationStatus.SKIP: 2,
     }
     assert statuses(evaluations[NETWEB], rule) == {
         ValidationStatus.PASS: 1,
         ValidationStatus.SKIP: 1,
     }
-    assert statuses(evaluations[HDFC], rule) == {ValidationStatus.PASS: 2, ValidationStatus.SKIP: 2}
+    # HDFC: FY25 passes on both bases, FY26 consolidated passes; FY26 standalone is the one real
+    # block (see test_the_only_block_is_hdfc_standalone_opening_cash_of_h1_fy27)
+    assert statuses(evaluations[HDFC], rule) == {
+        ValidationStatus.PASS: 3,
+        ValidationStatus.SKIP: 2,
+        ValidationStatus.BLOCK: 1,
+    }
     for evaluation in evaluations.values():
         for row in evaluation.results:
             if row.rule_id == rule and row.status is ValidationStatus.SKIP:
@@ -166,6 +175,8 @@ def test_hdfc_pdf_opening_cash_is_never_current_where_its_date_is_unverifiable(g
     XBRL closing cash of 1,651,422.7 mn), which blocked the standalone cash lines. That was a
     date-mapping fault, not an OCR error (M04 now refuses such a balance); the same columns also
     carry real OCR errors (closing cash 4,651,422.8 for 1,651,422.7; 25633937 without decimals).
+    The Q4 FY26 column no longer needs refusing: the H1 FY27 XBRL gives the opening cash at
+    31 Mar 2026 itself (and disagrees with the FY26 closing cash, see the block test).
     """
     refused = {
         key: sorted({r for f in column.rejected for r in f.reasons})
@@ -176,7 +187,6 @@ def test_hdfc_pdf_opening_cash_is_never_current_where_its_date_is_unverifiable(g
     assert refused == {
         (HDFC_Q2_PDF, "cash_flow", "standalone", "2024-09-30", "2024-09-30"): both,
         (HDFC_Q2_PDF, "cash_flow", "standalone", "2025-09-30", "2025-09-30"): both,
-        (HDFC_Q4_PDF, "cash_flow", "standalone", "2026-03-31", "2026-03-31"): both,
     }
     current = get_facts(HDFC, ["opening_cash"], None, "standalone", engine=ENGINE)
     assert current and {f.source_class.value for f in current} == {"xbrl"}
@@ -201,42 +211,82 @@ def test_income_sums_hold_on_real_data(evaluations) -> None:
     assert skipped == dict.fromkeys(
         [("Q", "2024-09-30"), ("H", "2024-09-30"), ("H", "2025-03-31")], ["total_income"]
     )
-    assert statuses(evaluations[GABRIEL], "pl_total_income") == {ValidationStatus.PASS: 9}
+    assert statuses(evaluations[GABRIEL], "pl_total_income") == {
+        ValidationStatus.PASS: 22,  # both bases since the inbox of 2026-10-20
+        ValidationStatus.SKIP: 1,  # standalone FY24: a PDF comparative with no income lines
+    }
 
 
-def test_nothing_current_is_blocked_and_the_columns_that_would_have_blocked_are_rejected(
-    evaluations, gate
-) -> None:
-    """Without the gate, Gabriel standalone H1 FY26 balance sheet and three HDFC cash-flow columns
-    blocked their rules. They are rejected; every other PDF/OCR column that would have filled a
-    gap is listed with its cause."""
-    for evaluation in evaluations.values():
-        assert not [r for r in evaluation.results if r.status is ValidationStatus.BLOCK]
+def test_the_only_block_is_hdfc_standalone_opening_cash_of_h1_fy27(evaluations) -> None:
+    """A real inconsistency between two XBRL filings, found when the H1 FY27 filing was added.
+
+    HDFC Bank standalone closing cash at 31 Mar 2026 is 2,976,068.4 mn in the FY26 results; the
+    H1 FY27 results open the half year at 2,984,663.6 mn (8,595.2 mn, 0.29 % more). Both are
+    filed XBRL values, so nothing is wrong with the extraction: the later filing restated its
+    opening balance (or one of the two is mistaken). The cash lines of that date stay blocked
+    until a person looks at it; every other rule passes or warns.
+    """
+    blocked = [
+        (r.isin, r.period_end, r.basis, r.rule_id)
+        for evaluation in evaluations.values()
+        for r in evaluation.results
+        if r.status is ValidationStatus.BLOCK
+    ]
+    assert blocked == [(HDFC, "2026-03-31", "standalone", "opening_cash_equals_prior_closing")]
+    row = next(r for r in evaluations[HDFC].results if r.status is ValidationStatus.BLOCK)
+    assert row.details["sources"] == {"left": "xbrl", "right": "xbrl"}
+    assert (row.details["left"], row.details["right"]) == ("2984663600000", "2976068400000")
+
+
+def test_the_columns_that_would_have_changed_the_view_are_rejected_for_cause(gate) -> None:
+    """Every PDF/OCR column that would fill a gap in the current view is listed; each is rejected.
+
+    Since the inbox of 2026-10-20 the Netweb Q1 FY26, Gabriel standalone Q2 FY26 and HDFC Q4 FY26
+    cash-flow columns have XBRL to cover them and are no longer on this list. The list below is
+    PDF-only values below parsing.pdf.min_table_confidence (older comparatives, most of them
+    FY24) and the two HDFC cash-flow columns whose date is unverifiable. Two columns are parse
+    leftovers: Gabriel Q2 FY26 standalone cash flow read as 2020-04-01..2020-09-30, and an
+    'unknown' statement page read as 2024-10-01..2025-03-31; both stay rejected.
+    """
     pl = "profit_and_loss"
     assert would_fill_rejections(gate) == {
-        # an OCR decimal slip in the column (identity failed): profit 30,479 for 304.79 (100x)
-        (NETWEB, NETWEB_Q2_PDF, pl, "standalone", "2025-04-01", "2025-06-30"),
-        # a text-layer decimal slip: total equity and liabilities 2010572 for 20,105.72 (100x)
-        (GABRIEL, GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-09-30", "2025-09-30"),
-        # date unverifiable + low-confidence OCR (see the HDFC test)
         (HDFC, HDFC_Q2_PDF, "cash_flow", "standalone", "2024-09-30", "2024-09-30"),
         (HDFC, HDFC_Q2_PDF, "cash_flow", "standalone", "2025-09-30", "2025-09-30"),
-        (HDFC, HDFC_Q4_PDF, "cash_flow", "standalone", "2026-03-31", "2026-03-31"),
-        # PDF-only values below parsing.pdf.min_table_confidence (columns that add up)
-        (HDFC, "FIL-d4dbfc854227", pl, "standalone", "2025-04-01", "2025-06-30"),
-        (HDFC, HDFC_Q4_PDF, pl, "consolidated", "2025-10-01", "2025-12-31"),
-        (GABRIEL, "FIL-133dad08692c", pl, "standalone", "2024-04-01", "2025-03-31"),
-        (GABRIEL, GABRIEL_Q2_PDF, "balance_sheet", "standalone", "2025-03-31", "2025-03-31"),
-        (GABRIEL, GABRIEL_Q2_PDF, pl, "consolidated", "2024-10-01", "2025-03-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "consolidated", "2023-04-01", "2024-03-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "consolidated", "2024-01-01", "2024-03-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "consolidated", "2024-10-01", "2024-12-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "standalone", "2023-04-01", "2024-03-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "standalone", "2024-01-01", "2024-03-31"),
+        (HDFC, HDFC_Q4_FY25_PDF, pl, "standalone", "2024-10-01", "2024-12-31"),
+        (GABRIEL, "FIL-133dad08692c", "balance_sheet", "standalone", "2024-03-31", "2024-03-31"),
+        (GABRIEL, "FIL-133dad08692c", pl, "standalone", "2023-04-01", "2024-03-31"),
+        (GABRIEL, "FIL-133dad08692c", pl, "standalone", "2024-01-01", "2024-03-31"),
+        (GABRIEL, GABRIEL_Q2_PDF, "cash_flow", "standalone", "2020-04-01", "2020-09-30"),
+        (GABRIEL, GABRIEL_Q2_PDF, pl, "consolidated", "2024-04-01", "2024-09-30"),
+        (GABRIEL, GABRIEL_Q2_PDF, pl, "consolidated", "2024-07-01", "2024-09-30"),
+        (GABRIEL, GABRIEL_Q2_PDF, "unknown", "consolidated", "2024-10-01", "2025-03-31"),
     }
 
 
 def test_gabriel_cash_flow_differs_from_balance_sheet_cash(evaluations) -> None:
-    rows = {r.period_end: r for r in evaluations[GABRIEL].results if r.rule_id == "cash_ties_to_bs"}
-    assert {k: v.status for k, v in rows.items()} == dict.fromkeys(rows, ValidationStatus.WARN)
-    gaps = {k: Decimal(v.details["abs_diff"]) / MN for k, v in rows.items()}
+    rows = {
+        (r.period_end, r.basis): r
+        for r in evaluations[GABRIEL].results
+        if r.rule_id == "cash_ties_to_bs"
+    }
+    # consolidated: the cash flow statement's cash differs from the balance-sheet line (bank
+    # balances and the like); standalone, added with the inbox of 2026-10-20, ties exactly
+    consolidated = {k[0]: v for k, v in rows.items() if k[1] == "consolidated"}
+    assert {k: v.status for k, v in consolidated.items()} == dict.fromkeys(
+        consolidated, ValidationStatus.WARN
+    )
+    gaps = {k: Decimal(v.details["abs_diff"]) / MN for k, v in consolidated.items()}
     expected = {"2025-03-31": "38.65", "2025-09-30": "34.41", "2026-03-31": "15.08"}
     assert gaps == {k: Decimal(v) for k, v in expected.items()}
+    standalone = {k[0]: v for k, v in rows.items() if k[1] == "standalone"}
+    assert {k: (v.status, v.details["abs_diff"]) for k, v in standalone.items()} == dict.fromkeys(
+        ["2025-03-31", "2025-09-30", "2026-03-31"], (ValidationStatus.PASS, "0")
+    )
     # Netweb ties exactly at its three XBRL dates; the fourth result is a skip: the H1 FY25 closing
     # cash of the Q2 FY26 PDF (30 Sep 2024) has no balance-sheet cash to compare with.
     netweb = {
@@ -258,7 +308,9 @@ def netweb_rows(evaluations):
 def test_netweb_cross_source_findings(evaluations) -> None:
     rows = netweb_rows(evaluations)
     warned = {(r.period_end, r.period_type): r for r in rows if r.status is ValidationStatus.WARN}
-    assert set(warned) == {("2025-03-31", "INSTANT"), ("2026-03-31", "Q")}
+    # the third is Q1 FY26: the scan's profit 30,479 against the XBRL's 304.79 (100x)
+    assert set(warned) == {("2025-03-31", "INSTANT"), ("2025-06-30", "Q"), ("2026-03-31", "Q")}
+    assert warned[("2025-06-30", "Q")].details["concepts"] == ["profit_after_tax"]
     assert set(warned[("2025-03-31", "INSTANT")].details["concepts"]) == {
         "total_assets", "total_equity_and_liabilities", "total_equity", "other_equity",
         "total_current_assets",
@@ -352,3 +404,75 @@ def test_netweb_q4_fy26_has_two_ocr_errors_in_two_pdfs(evaluations) -> None:
         if str(f.period.end) == "2026-03-31" and f.period.type.value == "Q"
     }
     assert {c: f.source_class.value for c, f in current.items()} == dict.fromkeys(diffs, "xbrl")
+
+
+# --- the Scheme of Arrangement: restated comparatives and the event that explains them ----------
+
+GABRIEL_Q1_FY27_PDF = "FIL-83a2f50f0a6d"
+
+
+def test_gabriel_restated_comparatives_are_explained_by_the_filings_own_note(evaluations) -> None:
+    """Every comparative column of the Q1 FY27 results differs from the first filing, and says why.
+
+    Standalone, the sums still hold (profit before tax less tax is profit) and the note explains it
+    too; consolidated, the restated profit before tax now includes the associates' share, so the
+    sums of the old layout do not hold, and the note is what explains it.
+    """
+    found = {
+        (c.basis, c.period_end.isoformat()): c
+        for isin, c, _ in evaluations[GABRIEL].restated
+        if c.pdf_filing_id == GABRIEL_Q1_FY27_PDF
+    }
+    assert sorted(found) == [
+        ("consolidated", "2025-06-30"),
+        ("consolidated", "2026-03-31"),
+        ("standalone", "2025-06-30"),
+        ("standalone", "2026-03-31"),
+    ]
+    assert all(c.comparative for c in found.values())
+    assert found[("standalone", "2025-06-30")].explained_by == ["identities", "note"]
+    assert found[("consolidated", "2025-06-30")].explained_by == ["note"]
+    pages = {k: c.note["page"] for k, c in found.items()}
+    assert pages[("standalone", "2025-06-30")] == 4 and pages[("consolidated", "2025-06-30")] == 7
+    assert (
+        "figures for the previous periods have been restated accordingly"
+        in (found[("consolidated", "2025-06-30")].note["text"])
+    )
+
+
+def test_gabriel_comparatives_with_nothing_to_explain_them_are_left_to_the_review_queue(
+    evaluations,
+) -> None:
+    left = sorted(
+        (c.basis, c.pdf_filing_id, c.period_end.isoformat(), c.classification)
+        for _, c, _ in evaluations[GABRIEL].disagreements
+    )
+    assert left == [
+        ("consolidated", "FIL-6173f7a73666", "2025-03-31", "unclear"),
+        ("standalone", GABRIEL_Q2_PDF, "2025-03-31", "ocr_error_likely"),
+    ]
+
+
+def test_the_scheme_is_one_recorded_event_covering_both_bases() -> None:
+    events = tables.corporate_events
+    queue = tables.review_queue
+    with ENGINE.connect() as conn:
+        rows = list(conn.execute(sa.select(events).where(events.c.isin == GABRIEL)))
+        proposals = {
+            r.id: r.status
+            for r in conn.execute(
+                sa.select(queue).where(queue.c.item_type == "corporate_event_proposal")
+            )
+            if f'"filing_id": "{GABRIEL_Q1_FY27_PDF}"' in r.payload_json
+        }
+    (event,) = rows
+    assert (event.event_type, event.event_date) == ("comparative_restatement", "2026-04-01")
+    details = json.loads(event.details)
+    assert details["bases"] == ["standalone", "consolidated"]
+    assert details["pdf_filing_id"] == GABRIEL_Q1_FY27_PDF
+    assert (
+        "Scheme of Arrangement" in details["citation"]
+        and "pooling of interest" in details["citation"]
+    )
+    # item 763 (ignored, the wrong reading of page 4's heading) and the four of this restatement
+    assert Counter(proposals.values()) == {"resolved": 4, "ignored": 1}

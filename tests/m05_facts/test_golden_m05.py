@@ -85,15 +85,27 @@ def test_gabriel_revision_is_current_and_the_original_is_flagged() -> None:
 
 
 def test_gabriel_unchanged_facts_are_not_flagged_and_pl_has_no_restatement(taxonomy) -> None:
+    """Between XBRL versions only the FY26 revision's cash flow lines differ, and the Q1 FY26
+    standalone revision (it only fixes face value and EPS tags) is recorded but not flagged.
+    (PDF-against-PDF differences, e.g. comparatives restated for the scheme, are separate rows.)"""
+    old, new = tables.canonical_facts.alias("old"), tables.canonical_facts.alias("new")
+    r = tables.restatements
     with ENGINE.connect() as conn:
         rows = conn.execute(
-            sa.select(tables.restatements).where(tables.restatements.c.isin == GABRIEL)
+            sa.select(
+                r, old.c.source_class.label("old_class"), new.c.source_class.label("new_class")
+            )
+            .join(old, old.c.fact_id == r.c.old_fact_id)
+            .join(new, new.c.fact_id == r.c.new_fact_id)
+            .where(r.c.isin == GABRIEL, old.c.source_class == "xbrl", new.c.source_class == "xbrl")
         ).all()
     assert {r.concept for r in rows} == {
         "cfo", "cfi", "cff", "capex_ppe", "capex_intangibles", "dividends_paid",
-        "net_change_in_cash", "opening_cash", "closing_cash",
+        "net_change_in_cash", "opening_cash", "closing_cash", "eps_basic", "eps_diluted",
     }  # fmt: skip
-    assert all(taxonomy.concepts[r.concept].statement != "profit_and_loss" for r in rows)
+    pl = [r for r in rows if taxonomy.concepts[r.concept].statement == "profit_and_loss"]
+    assert {r.concept for r in pl} == {"eps_basic", "eps_diluted"}
+    assert all(r.flagged == 0 and r.period_end == "2025-06-30" for r in pl)  # 0 -> 3.88 EPS tag
     assert {r.concept for r in rows if r.flagged} == {
         "cfo", "cfi", "cff", "capex_ppe", "capex_intangibles",
     }  # fmt: skip
@@ -131,7 +143,7 @@ def test_netweb_xbrl_wins_over_pdf_for_q4_fy26() -> None:
         top = current_of(versions)[(versions[0].period.start, versions[0].period.end)]
         assert top.source_class.value == "xbrl" and top.source_filing_id == "FIL-3057b3f95ef2"
     pdf_only = [v for v in by_key.values() if {f.source_filing_id for f in v} == {NETWEB_PDF}]
-    assert pdf_only  # comparatives only the scan has
+    # comparatives only the scan has (the Q3 FY26 XBRL has since replaced most of them)
     for versions in pdf_only:
         top = current_of(versions)[(versions[0].period.start, versions[0].period.end)]
         assert top.source_class.value in ("pdf", "ocr")
@@ -194,3 +206,49 @@ def test_hdfc_bank_asset_quality_exists_only_on_the_standalone_basis() -> None:
         ).all()
     assert rows and {r.basis for r in rows} == {"standalone"}
     assert not any(f.is_derived for f in get_facts(HDFC, ["bank_gross_npa"], engine=ENGINE))
+
+
+# --- Gabriel's restated Q1 FY26 profit: printed again by the Q1 FY27 results ---------------------
+
+Q1_26 = Period(date(2025, 4, 1), date(2025, 6, 30), PeriodType.Q)
+GABRIEL_Q1_FY27_PDF = "FIL-83a2f50f0a6d"
+
+
+@pytest.mark.parametrize(
+    ("basis", "original", "restated", "where"),
+    [
+        ("consolidated", "619720000", "1054530000.00", "7:38:3"),
+        ("standalone", "556710000", "596130000.00", "4:36:3"),
+    ],
+)
+def test_gabriel_q1_fy26_profit_restated_by_the_scheme_is_a_comparative_not_the_current_value(
+    basis, original, restated, where
+) -> None:
+    """The Q1 FY27 PDF prints Q1 FY26 profit again (third value column of the P&L, page 7
+    consolidated, page 4 standalone): a native-text comparative, stored, never the current value."""
+    versions = [f for f in _all(GABRIEL, "profit_after_tax", basis) if f.period == Q1_26]
+    comparatives = [f for f in versions if f.is_pdf_comparative]
+    assert [(f.source_filing_id, str(f.value)) for f in comparatives] == [
+        (GABRIEL_Q1_FY27_PDF, restated)
+    ]
+    assert comparatives[0].confidence and comparatives[0].confidence >= 0.85
+    c = tables.parsed_facts
+    with ENGINE.connect() as conn:
+        loc = conn.execute(
+            sa.select(c.c.source_loc).where(c.c.id == comparatives[0].parsed_fact_id)
+        ).scalar()
+    assert loc == where
+    current = get_fact(GABRIEL, "profit_after_tax", Q1_26, basis, engine=ENGINE)
+    assert (current.source_class.value, str(current.value)) == ("xbrl", original)
+    assert not current.is_pdf_comparative
+
+
+def test_a_current_column_of_the_same_pdf_is_not_a_comparative() -> None:
+    """The Q1 FY27 column of that PDF is the company's report of its own period."""
+    q1_27 = Period(date(2026, 4, 1), date(2026, 6, 30), PeriodType.Q)
+    ours = [
+        f
+        for f in _all(GABRIEL, "profit_after_tax", "consolidated")
+        if f.period == q1_27 and f.source_filing_id == GABRIEL_Q1_FY27_PDF
+    ]
+    assert [str(f.value) for f in ours] == ["1081260000.00"] and not ours[0].is_pdf_comparative

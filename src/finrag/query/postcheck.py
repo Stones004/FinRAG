@@ -177,6 +177,9 @@ def build_citations(evidence: Evidence, aliases: list[str]) -> list[Citation]:
                         "basis": fact.basis,
                         "filing_id": fact.source_filing_id,
                         "filed_on": fact.filed_on,
+                        "comparative_in": (
+                            fact.filing_period_end if fact.is_pdf_comparative else None
+                        ),
                     },
                 )
             )

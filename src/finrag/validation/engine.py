@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -31,8 +31,9 @@ from finrag.facts.dependencies import PeriodKey
 from finrag.facts.models import Fact
 from finrag.normalize.taxonomy import Taxonomy, load_taxonomy
 from finrag.validation import checks
-from finrag.validation.cross_source import RESTATED, Cluster, analyse
-from finrag.validation.events import propose_event
+from finrag.validation.cross_source import Cluster, analyse, explain
+from finrag.validation.events import propose_disagreement, propose_event
+from finrag.validation.restatement_notes import find_note
 from finrag.validation.rules import (
     CrossPeriodRule,
     CrossSourceRule,
@@ -69,6 +70,8 @@ class Evaluation:
 
     results: list[ResultRow] = field(default_factory=list)
     restated: list[tuple[str, Cluster, str]] = field(default_factory=list)  # (isin, cluster, rule)
+    # native-text PDF comparatives that differ from the original with nothing to explain it
+    disagreements: list[tuple[str, Cluster, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -207,9 +210,18 @@ def _cross_source_rows(
     versions: list[Fact],
     periods: Collection[PeriodKey] | None,
     settings: Settings,
-) -> tuple[list[ResultRow], list[Cluster]]:
-    """XBRL vs PDF/OCR: one row per period compared; the clusters that look restated."""
+    notes: Callable[[str, str], dict[str, Any] | None],
+) -> tuple[list[ResultRow], list[Cluster], list[Cluster]]:
+    """XBRL vs PDF/OCR: one row per period compared; the clusters that are restatements, and the
+    comparatives that disagree with an original without anything to explain it."""
     clusters = analyse(versions, list(rule.identities), settings)
+    for cluster in clusters:
+        if cluster.differences:
+            explain(
+                cluster,
+                notes(cluster.pdf_filing_id, cluster.basis) if cluster.comparative else None,
+                settings,
+            )
     ends: dict[tuple[date, str], list[Cluster]] = defaultdict(list)
     for cluster in clusters:
         for slot in cluster.compared:
@@ -244,7 +256,9 @@ def _cross_source_rows(
             details["clusters"] = [c.summary() for c in shown]
         status = rule.fail_status if breaches else ValidationStatus.PASS
         rows.append(ResultRow(isin, end.isoformat(), period_type, basis, rule.id, status, details))
-    return rows, [c for c in clusters if c.classification == RESTATED]
+    restated = [c for c in clusters if c.explained_by]
+    disagreeing = [c for c in clusters if c.comparative and c.differences and not c.explained_by]
+    return rows, restated, disagreeing
 
 
 def _sector_of(conn: Connection, isin: str) -> str:
@@ -275,6 +289,19 @@ def evaluate_isin(
     # A PDF column whose values match the other basis's XBRL on every shared key was filed under
     # the wrong basis (its page names none): compare it with the basis it belongs to.
     misbased = misbased_columns(by_basis, settings)
+    found_notes: dict[tuple[str, str], dict[str, Any] | None] = {}
+
+    def note_for(rule: CrossSourceRule) -> Callable[[str, str], dict[str, Any] | None]:
+        """(Filing id, basis) -> the filing's restatement note (read once per run), or None."""
+
+        def look(filing_id: str, basis: str) -> dict[str, Any] | None:
+            if (filing_id, basis) not in found_notes:
+                match = find_note(filing_id, rule.restatement_notes, basis, engine)
+                found_notes[(filing_id, basis)] = None if match is None else match.as_dict()
+            return found_notes[(filing_id, basis)]
+
+        return look
+
     compared: dict[str, list[Fact]] = defaultdict(list)
     for basis, facts in by_basis.items():
         for fact in facts:
@@ -289,8 +316,8 @@ def evaluate_isin(
             if not rules.applies_to(rule, sector):
                 continue
             if isinstance(rule, CrossSourceRule):
-                rows, restated = _cross_source_rows(
-                    isin, basis, rule, compared[basis], periods, settings
+                rows, restated, disagreeing = _cross_source_rows(
+                    isin, basis, rule, compared[basis], periods, settings, note_for(rule)
                 )
                 for row in rows:
                     moved = [
@@ -301,6 +328,7 @@ def evaluate_isin(
                     if moved:
                         row.details["basis_corrected"] = moved
                 out.restated.extend((isin, c, rule.id) for c in restated)
+                out.disagreements.extend((isin, c, rule.id) for c in disagreeing)
             elif isinstance(rule, CrossPeriodRule):
                 rows = _cross_period_rows(isin, basis, rule, current, periods, settings)
             else:
@@ -337,16 +365,13 @@ def run_validation(
                         created_at=now,
                     )
                 )
+            rounding = get_settings().validation.cross_source.rounding_inr
             for code, cluster, rule_id in evaluation.restated:
-                item = propose_event(
-                    conn,
-                    code,
-                    cluster,
-                    rule_id,
-                    get_settings().validation.cross_source.rounding_inr,
-                )
+                item = propose_event(conn, code, cluster, rule_id, rounding)
                 if item is not None:
                     proposals.append(item)
+            for code, cluster, rule_id in evaluation.disagreements:
+                propose_disagreement(conn, code, cluster, rule_id)
         report = ValidationReport(run_id, isin, evaluation.results, sorted(set(proposals)))
         finish_job(job, JobStatus.SUCCEEDED, {"run_id": run_id, **report.counts()}, engine=engine)
     except Exception as exc:

@@ -196,7 +196,9 @@ def test_replay_hdfc_management_say_searches_management_turns_only(real, monkeyp
         ),
     ]
     llm = FakeLLM(default=claims_json(*old))
-    answer = ask("What did HDFC management say about asset quality?", llm, embedder)
+    # the period is named: with none, the latest period with data is now Q2 FY27 (results filed,
+    # no call yet) and a management question would be answered from results text only
+    answer = ask("What did HDFC management say about asset quality in Q1 FY27?", llm, embedder)
     prompt = llm.calls[0][1]
     assert "role analyst" not in prompt and "role management" in prompt
     roles = {c.detail["speaker_role"] for c in answer.citations if c.kind == "chunk"}
@@ -215,7 +217,7 @@ def test_replay_hdfc_gnpa_latest_is_the_figure_only(real) -> None:
     llm = FakeLLM(default="never")
     answer = ask("HDFC GNPA latest", llm)
     assert llm.calls == []
-    assert "Gross NPA ratio, Q1 FY27 (Apr–Jun 2026), standalone: 1.17%" in answer.text
+    assert "Gross NPA ratio, Q2 FY27 (Jul–Sep 2026), standalone: 1.11%" in answer.text  # latest
     assert answer.explanation == "" and "What the filings say" not in answer.text
     assert [c.alias for c in answer.citations] == ["F1"]
 
@@ -255,3 +257,66 @@ def test_netweb_capex_plan_fy28_searches_the_latest_calls_and_labels_the_numbers
     assert "role analyst" not in prompt  # guidance is management's, not an analyst's question
     assert "Management guidance is not in the indexed filings." not in answer.text
     assert answer.text.count("  > “") == 2  # related disclosures, from management turns only
+
+
+def test_gabriel_q1_fy27_profit_growth_shows_the_original_and_the_restated_base(real) -> None:
+    """74.48% is against the Q1 FY26 profit first filed (619.72 mn); the Q1 FY27 results print it
+    after the Scheme of Arrangement as 1,054.53 mn (page 7), on which the growth is 2.53%."""
+    answer = ask("Gabriel PAT growth year on year Q1 FY27 consolidated")
+    text = answer.text
+    assert "[F1] Profit growth (year on year), Q1 FY27 (Apr–Jun 2026), consolidated: 74.48%" in text
+    assert "Not like for like: the earlier period was restated (a comparative restatement" in text
+    assert "effective 2026-04-01, event 2 — Composite Scheme of Arrangement" in text
+    assert "Originally filed: Profit for the period, Q1 FY26 61.97 crore [F4]" in text
+    assert (
+        "Against the restated comparative: Profit for the period, Q1 FY26 105.45 crore [F5] "
+        "(printed in FIL-83a2f50f0a6d, p. 7) → Profit growth (year on year) 2.53%" in text
+    )
+    assert (
+        "Also on the other basis: [F3] Profit growth (year on year), Q1 FY27 (Apr–Jun 2026)" in text
+    )
+    assert "Originally filed: Profit for the period, Q1 FY26 55.67 crore [F6]" in text
+    assert "(printed in FIL-83a2f50f0a6d, p. 4) → Profit growth (year on year) 27.44%" in text
+    # every source line is the record of the figure shown, with its own basis
+    cited = {c.alias: c for c in answer.citations}
+    assert (
+        cited["F1"].detail["basis"] == "consolidated"
+        and cited["F3"].detail["basis"] == "standalone"
+    )
+    assert (
+        cited["F5"].detail["basis"] == "consolidated"
+        and cited["F7"].detail["basis"] == "standalone"
+    )
+    assert cited["F5"].detail["comparative_in"] == "2026-06-30"
+    assert cited["F4"].detail["comparative_in"] is None  # the original is not a comparative
+
+
+def test_gabriel_growth_on_the_standalone_basis_leads_with_standalone_and_cites_it(real) -> None:
+    answer = ask("Gabriel PAT growth year on year Q1 FY27 standalone")
+    cited = {c.alias: c for c in answer.citations}
+    assert (
+        "[F1] Profit growth (year on year), Q1 FY27 (Apr–Jun 2026), standalone: 36.46%"
+        in answer.text
+    )
+    assert [cited[a].detail["basis"] for a in ("F1", "F3")] == ["standalone", "consolidated"]
+    assert (
+        f"- [F1] {cited['F1'].id} (metric pat_growth_yoy, period ending 2026-06-30, standalone)"
+        in answer.text
+    )
+    assert (
+        f"- [F3] {cited['F3'].id} (metric pat_growth_yoy, period ending 2026-06-30, consolidated)"
+        in answer.text
+    )
+
+
+@pytest.mark.slow
+def test_hdfc_management_question_with_no_period_takes_the_latest_call(real, monkeypatch) -> None:
+    """Results are filed up to Q2 FY27, the latest call is Q1 FY27: management said it in Q1."""
+    embedder = _embedder(monkeypatch)
+    llm = FakeLLM(default=claims_json())
+    answer = ask("What did HDFC management say about asset quality?", llm, embedder)
+    assert "Q1 FY27 (Apr–Jun 2026)" in answer.interpretation
+    assert "the latest period with an earnings-call transcript is used" in answer.interpretation
+    assert "Period asked: Q1 FY27 (Apr–Jun 2026)" in llm.calls[0][1]
+    quarters = {c.detail["period_label"] for c in answer.citations if c.kind == "chunk"}
+    assert quarters <= {"Q1 FY27"}

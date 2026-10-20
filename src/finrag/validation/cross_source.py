@@ -9,6 +9,11 @@ together with the other differing keys of the same PDF filing and period end:
 * `ocr_error_likely` - a few isolated lines, each with an OCR-error pattern (a decimal point
   gained or lost, one wrong digit, a low-confidence cell) and a broken sum in the PDF;
 * `unclear` - anything else. Nothing is guessed.
+
+A cluster of native-text PDF comparatives (a column of an earlier period than the filing's own) is
+a corporate event only if the arithmetic of the PDF holds (`restated_comparative_likely`) or the
+filing's own note says the comparatives were restated and several lines shifted together with no
+OCR-error pattern (`explain`). Any other disagreement with an original goes to the review queue.
 """
 
 from __future__ import annotations
@@ -34,6 +39,9 @@ UNCLEAR = "unclear"
 SIGNAL_DECIMAL_SHIFT = "decimal_shift"
 SIGNAL_DIGIT = "digit_substitution"
 SIGNAL_LOW_CONFIDENCE = "low_confidence"
+
+EXPLAINED_BY_IDENTITIES = "identities"
+EXPLAINED_BY_NOTE = "note"
 
 PDF_CLASSES = (SourceClass.PDF, SourceClass.OCR)
 
@@ -114,6 +122,9 @@ class Cluster:
     evidence: list[IdentityEvidence] = field(default_factory=list)
     classification: str | None = None
     reasons: list[str] = field(default_factory=list)
+    comparative: bool = False  # native-text PDF columns of an earlier period than the filing's
+    explained_by: list[str] = field(default_factory=list)  # "identities" and/or "note"
+    note: dict[str, Any] | None = None  # the filing's restatement note (page, words), if used
 
     @property
     def breaches(self) -> list[KeyDifference]:
@@ -129,6 +140,8 @@ class Cluster:
             "classification": self.classification,
             "reasons": self.reasons,
             "differing_keys": len(self.differences),
+            "comparative": self.comparative,
+            "explained_by": self.explained_by,
             "periods_affected": sorted({d.period.type.value for d in self.differences}),
             "identities": [e.as_dict() for e in self.evidence],
         }
@@ -274,6 +287,28 @@ def classify(cluster: Cluster, settings: Settings) -> None:
     cluster.reasons = reasons
 
 
+def explain(cluster: Cluster, note: dict[str, Any] | None, settings: Settings) -> None:
+    """Set `explained_by`: what makes the differences of this cluster a restatement.
+
+    Identities that still hold in the PDF (classification `restated_comparative_likely`) explain
+    any cluster. The filing's own restatement note explains a cluster of native-text comparatives
+    whose differences are several lines shifting together, none of them with an OCR-error pattern;
+    one isolated line is not what a restatement note is about.
+    """
+    cluster.explained_by = []
+    if cluster.classification == RESTATED:
+        cluster.explained_by.append(EXPLAINED_BY_IDENTITIES)
+    minimum = settings.validation.cross_source.min_shifted_keys
+    if (
+        note is not None
+        and cluster.comparative
+        and len(cluster.differences) >= minimum
+        and not any(d.signals for d in cluster.differences)
+    ):
+        cluster.explained_by.append(EXPLAINED_BY_NOTE)
+        cluster.note = note
+
+
 def analyse(versions: list[Fact], identities: list[Identity], settings: Settings) -> list[Cluster]:
     """Every stored version of one (isin, basis) -> clusters with differences and classification."""
     xbrl = _by_key(f for f in versions if f.source_class is SourceClass.XBRL)
@@ -292,8 +327,10 @@ def analyse(versions: list[Fact], identities: list[Identity], settings: Settings
             if reference is None or reference.unit != other.unit:
                 continue
             cluster = by_end.setdefault(
-                other.period.end, Cluster(other.basis, filing_id, other.period.end)
+                other.period.end,
+                Cluster(other.basis, filing_id, other.period.end, comparative=True),
             )
+            cluster.comparative = cluster.comparative and other.is_pdf_comparative
             slot = (other.period.end, other.period.type.value)
             cluster.compared[slot] = cluster.compared.get(slot, 0) + 1
             if not _beyond_rounding(reference, other, settings):

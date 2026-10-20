@@ -10,7 +10,7 @@ from finrag.core.db import tables, transaction
 from finrag.core.fiscal import period_to_label
 from finrag.core.logging import get_logger
 from finrag.core.types import text_to_decimal
-from finrag.facts.current_view import get_fact
+from finrag.facts.current_view import get_fact, get_fact_by_id
 from finrag.metrics.query import get_metric
 from finrag.metrics.registry import MetricRegistry
 from finrag.narrative.embedder import Embedder
@@ -45,6 +45,7 @@ class Retriever:
         evidence = Evidence()
         self._numbers(plan, evidence)
         self._alias_figures(evidence)
+        self._alias_bases(evidence)
         self._narrative(plan, evidence)
         return evidence
 
@@ -210,6 +211,30 @@ class Retriever:
                 assert entry.fact is not None
                 evidence.facts.append(entry.fact)
                 evidence.fact_aliases[entry.alias] = entry.fact.fact_id
+
+    def _alias_bases(self, evidence: Evidence) -> None:
+        """A growth shown on the restated comparative cites both bases it rests on.
+
+        The originally filed figure and the comparative printed with the later results each get an
+        alias of their own, after the figures of the question (they are not capped with them).
+        """
+        known = set(evidence.fact_aliases.values())
+        for entry in evidence.entries:
+            mv = entry.metric_value
+            if entry.alias is None or mv is None:
+                continue
+            for item in mv.details.get("like_for_like", {}).get("inputs", []):
+                for key in ("original_fact_id", "restated_fact_id"):
+                    fact_id = item[key]
+                    if fact_id in known:
+                        continue
+                    fact = get_fact_by_id(fact_id, self.engine)
+                    if fact is None:
+                        continue
+                    known.add(fact_id)
+                    alias = f"F{len(evidence.fact_aliases) + len(evidence.metric_aliases) + 1}"
+                    evidence.facts.append(fact)
+                    evidence.fact_aliases[alias] = fact_id
 
     # -- narrative ---------------------------------------------------------------------------
 

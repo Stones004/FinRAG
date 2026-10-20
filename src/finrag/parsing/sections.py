@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -57,6 +57,7 @@ class SectionsRegistry(_Section):
     table_labels: TableLabels
     financial_terms: list[str]
     column_checks: list[ColumnCheck] = []
+    basis_title_patterns: list[str] = []
 
     @field_validator("statement_pages", "basis_patterns", "unit_patterns")
     @classmethod
@@ -65,6 +66,13 @@ class SectionsRegistry(_Section):
         for patterns in value.values():
             for pattern in patterns:
                 re.compile(pattern)
+        return value
+
+    @field_validator("basis_title_patterns")
+    @classmethod
+    def _compile_titles(cls, value: list[str]) -> list[str]:
+        for pattern in value:
+            re.compile(pattern)
         return value
 
 
@@ -96,6 +104,7 @@ class SectionPatterns:
     continuation_words: frozenset[str]
     financial_terms: frozenset[str]
     column_checks: list[CompiledColumnCheck]
+    basis_titles: list[re.Pattern[str]] = field(default_factory=list)
 
 
 def _compile_all(groups: dict[str, list[str]]) -> dict[str, list[re.Pattern[str]]]:
@@ -148,4 +157,5 @@ def load_section_patterns(settings: Settings | None = None) -> SectionPatterns:
         continuation_words=frozenset(w.lower() for w in registry.table_labels.continuation_words),
         financial_terms=frozenset(t.lower() for t in registry.financial_terms),
         column_checks=[_compile_check(c) for c in registry.column_checks],
+        basis_titles=[re.compile(p, re.IGNORECASE) for p in registry.basis_title_patterns],
     )

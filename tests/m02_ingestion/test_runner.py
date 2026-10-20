@@ -80,6 +80,13 @@ def test_basis_and_period_conflicts_are_all_listed(db, kit, inbox) -> None:
     assert conflict_fields() == ["period_start", "period_end", "basis"]
 
 
+def test_a_governance_report_filed_as_results_is_quarantined(db, kit, inbox) -> None:
+    """Netweb's `financial_results__Q3FY25` inbox file was an Integrated Governance report."""
+    (inbox / f"{STEM}.xml").write_bytes(kit.make_xbrl(family="Governance"))
+    run_inbox()
+    assert only_filing().status == "quarantined" and conflict_fields() == ["document_kind"]
+
+
 def test_transcript_whose_title_names_another_quarter_is_quarantined(db, kit, inbox) -> None:
     name = "ALPHAX__earnings_call_transcript__Q1FY27__consolidated.pdf"
     (inbox / name).write_bytes(kit.full_transcript(quarter="Q4 FY26"))

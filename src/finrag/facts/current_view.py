@@ -34,6 +34,7 @@ def _select() -> sa.Select:
             c,
             f.c.filed_on.label("filing_filed_on"),
             f.c.revision_no.label("filing_revision_no"),
+            f.c.period_end.label("filing_period_end"),
             p.c.confidence.label("confidence"),
         )
         .select_from(
@@ -67,6 +68,7 @@ def _to_fact(row: sa.Row) -> Fact:
         filed_on=row.filing_filed_on,
         revision_no=row.filing_revision_no or 0,
         confidence=row.confidence,
+        filing_period_end=row.filing_period_end,
     )
 
 
@@ -162,6 +164,13 @@ def _without_placeholders(conn: Connection, isin: str, facts: list[Fact]) -> lis
         if f.fact_id not in hidden
         and not (f.is_derived and hidden & set((f.derivation or {}).get("input_fact_ids", [])))
     ]
+
+
+def get_fact_by_id(fact_id: str, engine: Engine | None = None) -> Fact | None:
+    """One stored fact by its ID, whatever its version or rank (None: unknown or quarantined)."""
+    with transaction(engine) as conn:
+        row = conn.execute(_select().where(c_.c.fact_id == fact_id)).first()
+    return _to_fact(row) if row is not None else None
 
 
 def best(facts: Iterable[Fact]) -> Fact | None:

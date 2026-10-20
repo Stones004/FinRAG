@@ -19,6 +19,12 @@ from finrag.query.formatter import Formatter, Rendered
 from finrag.query.models import Entry, Evidence, Intent, Plan, basis_phrase
 from finrag.query.period_resolver import describe_period
 
+
+def _a(noun: str) -> str:
+    """The indefinite article for a noun phrase."""
+    return "an" if noun[:1].lower() in "aeiou" else "a"
+
+
 MAIN = "main"
 ATTACHED = ("prior_year", "previous_period", "other_basis")
 
@@ -43,6 +49,7 @@ class NumbersBlockBuilder:
         self.taxonomy = taxonomy
         self.unit = unit
         self._actual = False  # set per answer: a guidance question shows actuals, labelled
+        self._fact_alias: dict[str, str] = {}  # set per answer: fact id -> alias
 
     # -- names -------------------------------------------------------------------------------
 
@@ -79,6 +86,7 @@ class NumbersBlockBuilder:
         if not intent.metrics:
             return block  # the question asks for no figure: nothing to show or to say about them
         self._actual = intent.forward_looking
+        self._fact_alias = {fid: alias for alias, fid in evidence.fact_aliases.items()}
         lines = [f"**Figures** — {basis_phrase(intent)}; amounts in {self.unit}."]
         if intent.forward_looking:
             shown = ", ".join(self.when(p) for p in intent.periods) or "the latest period"
@@ -104,6 +112,9 @@ class NumbersBlockBuilder:
         for note in evidence.warnings:
             lines.append(f"- Note: {note}")
         block.text = "\n".join(lines)
+        block.shown_aliases = sorted(
+            {a for a in block.shown_aliases if a}, key=lambda a: int(a[1:])
+        )
         return block
 
     def _label(self, entry: Entry) -> str:
@@ -128,7 +139,7 @@ class NumbersBlockBuilder:
             if shown.number is not None:
                 allowed.add(shown.number)
             lines = [f"{indent}[{entry.alias}] {title}: {shown.text}"]
-        return lines + self._flags(entry, allowed)
+        return lines + self._flags(entry, allowed, block)
 
     def _main(
         self, entry: Entry, entries: list[Entry], intent: Intent, block: NumbersBlock
@@ -201,16 +212,22 @@ class NumbersBlockBuilder:
 
     # -- flags -------------------------------------------------------------------------------
 
-    def _flags(self, entry: Entry, allowed: set[Decimal]) -> list[str]:
+    def _flags(self, entry: Entry, allowed: set[Decimal], block: NumbersBlock) -> list[str]:
         """Restatements, accounting-policy changes, warnings and fallbacks of one figure."""
         lines: list[str] = []
         mv = entry.metric_value
+        found = mv.details.get("like_for_like") if mv is not None else None
         for event in mv.basis_change if mv else []:
+            if found and found["event"]["event_id"] == event["event_id"]:
+                continue  # said below, with both bases
+            kind = event["event_type"].replace("_", " ")
             lines.append(
-                f"    Basis change: the periods straddle an {event['event_type'].replace('_', ' ')}"
-                f" effective {event['event_date']} (event {event['event_id']}), so this is not "
-                f"like for like. {event.get('citation', '')}".rstrip()
+                f"    Basis change: the periods straddle {_a(kind)} {kind} effective "
+                f"{event['event_date']} (event {event['event_id']}), so this is not like for like. "
+                f"{event.get('citation', '')}".rstrip()
             )
+        if found:
+            lines += self._like_for_like(entry, found, allowed, block)
         for row in entry.restatements:
             lines.append("    " + self._restatement(entry, row, allowed))
         if entry.restatements:
@@ -219,6 +236,57 @@ class NumbersBlockBuilder:
             lines += self._metric_notes(mv, entry.request.basis)
             if mv.status is MetricStatus.NOT_COMPUTED:
                 lines += self._blocked(mv)
+        return lines
+
+    def _like_for_like(
+        self, entry: Entry, found: dict[str, Any], allowed: set[Decimal], block: NumbersBlock
+    ) -> list[str]:
+        """A growth against the originally filed base, and against the restated comparative.
+
+        The headline above is against the base first filed; the company later restated that
+        period (the event named), so the two are shown side by side, each with its source.
+        """
+        metric = entry.request.metric
+        event = found["event"]
+        kind = event["event_type"].replace("_", " ")
+        named = f" — {event['citation']}" if event.get("citation") else ""
+        lines = [
+            f"    Not like for like: the earlier period was restated ({_a(kind)} {kind} effective "
+            f"{event['event_date']}, event {event['event_id']}{named}). The headline is against "
+            "the originally filed base:"
+        ]
+        restated = []
+        for item in found["inputs"]:
+            concept = item["concept"]
+            what = f"{self.name(concept)}, {item['period']}"
+            old = self.fmt.concept(Decimal(item["original_value"]), concept)
+            new = self.fmt.concept(Decimal(item["restated_value"]), concept)
+            for rendered in (old, new):
+                if rendered.number is not None:
+                    allowed.add(rendered.number)
+            old_alias = self._fact_alias.get(item["original_fact_id"])
+            new_alias = self._fact_alias.get(item["restated_fact_id"])
+            for alias, number in ((old_alias, old.number), (new_alias, new.number)):
+                if alias:
+                    block.shown_aliases.append(alias)
+                    block.allowed.setdefault(alias, set()).add(number or Decimal(0))
+            lines.append(
+                f"    - Originally filed: {what} {old.text}"
+                + (f" [{old_alias}]" if old_alias else "")
+            )
+            page = f", p. {item['restated_page']}" if item.get("restated_page") else ""
+            restated.append(
+                f"{what} {new.text}"
+                + (f" [{new_alias}]" if new_alias else "")
+                + f" (printed in {item['restated_filing_id']}{page})"
+            )
+        value = self.fmt.metric(Decimal(found["restated_value"]), metric)
+        if value.number is not None:
+            allowed.add(value.number)
+        lines.append(
+            f"    - Against the restated comparative: {'; '.join(restated)} → "
+            f"{self.name(metric)} {value.text}"
+        )
         return lines
 
     def _restatement(self, entry: Entry, row: dict[str, Any], allowed: set[Decimal]) -> str:

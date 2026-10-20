@@ -41,11 +41,29 @@ def statement_type_of(
     return leaders[0], best
 
 
+NEWLINE = "\n"
+
+
 def basis_of(text: str, patterns: SectionPatterns, scan_lines: int) -> Basis:
-    """Basis word in the first lines of the page: exactly one kind -> that basis, else UNKNOWN."""
-    head = "\n".join([line for line in text.splitlines() if line.strip()][:scan_lines])
-    found = [key for key, pats in patterns.basis.items() if _hits(pats, head)]
+    """The page's own basis: a basis word in its first lines, else one in a statement title.
+
+    Exactly one kind -> that basis, else UNKNOWN (the caller then uses the filing's label). The
+    title is looked for in every line because some text layers put the title block last.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    head = _kinds(NEWLINE.join(lines[:scan_lines]), patterns)
+    if head:
+        return Basis(head[0]) if len(head) == 1 else Basis.UNKNOWN
+    titles = NEWLINE.join(
+        line for line in lines if any(p.search(line) for p in patterns.basis_titles)
+    )
+    found = _kinds(titles, patterns)
     return Basis(found[0]) if len(found) == 1 else Basis.UNKNOWN
+
+
+def _kinds(text: str, patterns: SectionPatterns) -> list[str]:
+    """The basis kinds a text mentions."""
+    return [key for key, pats in patterns.basis.items() if _hits(pats, text)]
 
 
 def unit_hint_of(text: str, patterns: SectionPatterns) -> str | None:

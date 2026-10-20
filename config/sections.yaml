@@ -87,6 +87,13 @@ statement_pages:
 basis_patterns:
   consolidated: ['consolidated']
   standalone: ['standalone', 'stand[\s-]*alone']
+# A line that opens with one of these is a statement TITLE ("STATEMENT OF STANDALONE UNAUDITED FINANCIAL
+# RESULTS ...", "Consolidated Balance Sheet"). The text layer of some PDFs puts the title block at the end of the
+# page text, so the first lines miss it; the title is then looked for in every line of the page. A sentence
+# of the notes that merely mentions "the standalone financial results" does not open like a title.
+basis_title_patterns:
+  - '^\s*(?:the\s+)?(?:(?:un)?audited\s+)?(?:statements?|summary)\s+of\s+(?:(?:un)?audited\s+)?(?:consolidated|standalone|stand[\s-]*alone)(?![a-z])'
+  - '^\s*(?:(?:un)?audited\s+)?(?:consolidated|standalone|stand[\s-]*alone)\s+(?:(?:un)?audited\s+)?(?:statements?|balance\s+sheet|financial\s+results?|cash\s+flows?|segment|results?)(?![a-z])'
 unit_patterns:   # regex -> unit key in settings.units.multipliers
   # The rupee sign often comes out as a backtick or "Rs" in PDF text, so a currency mark may sit
   # between "in" and the unit ("Amount in ` millions").

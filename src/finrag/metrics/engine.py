@@ -34,6 +34,7 @@ from finrag.core.types import (
     decimal_to_text,
     utc_now_iso,
 )
+from finrag.facts.basis_check import beyond_rounding
 from finrag.facts.current_view import current_of, load_facts
 from finrag.facts.dependencies import AffectedSet
 from finrag.facts.models import Fact
@@ -43,7 +44,7 @@ from finrag.metrics.models import MetricRunReport
 from finrag.metrics.registry import InputSpec, Metric, MetricRegistry, load_metrics
 from finrag.normalize.taxonomy import Taxonomy, load_taxonomy
 from finrag.validation.engine import is_blocked, warnings_for
-from finrag.validation.events import CONFIRMABLE, recorded_events
+from finrag.validation.events import CONFIRMABLE, event_bases, recorded_events
 from finrag.validation.rules import Rules, load_rules
 
 log = get_logger("metrics")
@@ -92,6 +93,7 @@ class _Res:
     upstream_code: str | None = None  # why an input metric could not be computed
     present: bool = False  # something was found for it (a fact or an input metric's result)
     anchor: bool = False  # present, and read at the metric's own period (no offset)
+    earlier: Fact | None = None  # the fact an input read at an earlier period (an offset)
 
 
 @dataclass
@@ -114,8 +116,12 @@ class _Facts:
     def __init__(self, versions: list[Fact]) -> None:
         self.by_id = {f.fact_id: f for f in versions}
         grouped: dict[tuple[str, str], list[Fact]] = {}
+        self.comparatives: dict[tuple[str, str, Slot], list[Fact]] = {}
         for fact in versions:
             grouped.setdefault((fact.basis, fact.concept), []).append(fact)
+            if fact.is_pdf_comparative:
+                key = (fact.basis, fact.concept, (fact.period.start, fact.period.end))
+                self.comparatives.setdefault(key, []).append(fact)
         self.current: dict[str, dict[str, dict[Slot, Fact]]] = {}
         for (basis, concept), group in grouped.items():
             self.current.setdefault(basis, {})[concept] = current_of(group)
@@ -125,6 +131,24 @@ class _Facts:
 
     def bases(self) -> list[str]:
         return sorted(self.current)
+
+    def restated(self, original: Fact, anchor_end: date, events: list[_Event]) -> Fact | None:
+        """The comparative of an earlier period's fact, as printed with the anchor period's results.
+
+        A native-text PDF column of the filing that reports the period ending `anchor_end`, which
+        differs from the original beyond rounding and which a recorded restatement event covers.
+        """
+        found = self.comparatives.get(
+            (original.basis, original.concept, (original.period.start, original.period.end)), []
+        )
+        wanted = [
+            c
+            for c in found
+            if c.filing_period_end == anchor_end.isoformat()
+            and beyond_rounding(original, c, get_settings())
+            and any(e.covers(c.source_filing_id, c.basis) for e in events)
+        ]
+        return max(wanted, key=lambda c: c.order, default=None)
 
 
 def _shift_date(day: date, years: int) -> date:
@@ -168,8 +192,21 @@ class _Event:
     event_id: int
     event_type: str
     event_date: date
-    basis: str | None
+    bases: frozenset[str]  # the bases it concerns (empty: all)
     citation: str | None
+    filings: frozenset[str] = frozenset()  # the PDF filings whose comparatives it explains
+
+    def concerns(self, basis: str) -> bool:
+        """True if the event applies to this basis."""
+        return not self.bases or basis in self.bases
+
+    def covers(self, filing_id: str, basis: str) -> bool:
+        """True for a restatement event that explains the comparatives of this filing and basis."""
+        return (
+            self.event_type == EventType.COMPARATIVE_RESTATEMENT.value
+            and filing_id in self.filings
+            and self.concerns(basis)
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -335,6 +372,7 @@ class _Calculation:
                 )  # fmt: skip
             return res
         res.value, res.present, res.anchor = fact.value, True, spec.offset is None
+        res.earlier = None if spec.offset is None else fact
         res.acc.fact_ids.add(fact.fact_id)
         res.acc.ends.add(fact.period.end)
         self._attach(res, fact, used, shifted, slot, used_basis, metric, spec)
@@ -440,6 +478,7 @@ class _Calculation:
             )
         values: dict[str, Decimal] = {}
         acc, blocked, missing = _Acc(), [], []
+        earlier: dict[str, Fact] = {}
         anchored = False
         for alias, spec in metric.inputs.items():
             if spec.constant is not None:
@@ -451,6 +490,8 @@ class _Calculation:
                 else self._metric_input(metric, alias, spec, period)
             )
             anchored = anchored or res.anchor
+            if res.earlier is not None:
+                earlier[alias] = res.earlier
             acc.merge(res.acc)
             blocked.extend(res.blocked)
             missing.extend(res.missing)
@@ -479,9 +520,16 @@ class _Calculation:
                 ]
                 note = " A stored value was rejected as a placeholder."
             return self._not_computed(codes.MISSING_INPUT, f"Missing input: {text}.{note}", extra)
-        return self._finish(metric, values, acc)
+        return self._finish(metric, values, acc, earlier, period)
 
-    def _finish(self, metric: Metric, values: dict[str, Decimal], acc: _Acc) -> _Out:
+    def _finish(
+        self,
+        metric: Metric,
+        values: dict[str, Decimal],
+        acc: _Acc,
+        earlier: dict[str, Fact],
+        period: Period,
+    ) -> _Out:
         """All inputs are present: corporate-event break, evaluation, flags."""
         for event in self.events:
             if event.event_type in _BREAK_EVENTS and _straddles(acc.ends, event.event_date):
@@ -500,19 +548,88 @@ class _Calculation:
             e
             for e in self.events
             if e.event_type in CONFIRMABLE
-            and (e.basis is None or e.basis == self.basis)
+            and e.concerns(self.basis)
             and _straddles(acc.ends, e.event_date)
         ]
         details = self._details(codes.COMPUTED, acc, crossed)
+        like_for_like = self._like_for_like(metric, values, earlier, period, crossed)
+        if like_for_like is not None:
+            details["like_for_like"] = like_for_like
         return _Out(
             MetricStatus.COMPUTED,
             value,
             codes.COMPUTED,
-            self._sentence(acc, crossed),
+            self._sentence(acc, crossed, like_for_like),
             details,
             sorted(acc.fact_ids),
             acc,
         )
+
+    def _like_for_like(
+        self,
+        metric: Metric,
+        values: dict[str, Decimal],
+        earlier: dict[str, Fact],
+        period: Period,
+        crossed: list[_Event],
+    ) -> dict[str, Any] | None:
+        """The value on restated comparatives, when an earlier-period input was restated.
+
+        The company restated an earlier period (a recorded `comparative_restatement` event) and the
+        results of `period` print that earlier period again, restated, in a native-text PDF. The
+        same formula is evaluated with those printed figures in place of the originally filed
+        ones; the originally filed base stays the headline, which is then not like for like. Only
+        inputs read straight from facts are swapped; nothing is stored without a covering event.
+        """
+        events = [e for e in crossed if e.event_type == EventType.COMPARATIVE_RESTATEMENT.value]
+        if not events:
+            return None
+        swapped: dict[str, Fact] = {}
+        for alias, fact in earlier.items():
+            printed = self.facts.restated(fact, period.end, events)
+            if printed is not None:
+                swapped[alias] = printed
+        if not swapped:
+            return None
+        try:
+            value = evaluate(metric.formula, {**values, **{a: f.value for a, f in swapped.items()}})
+        except EvalError:
+            return None
+        covering = next(e for e in events if e.covers(next(iter(swapped.values())).source_filing_id,
+                                                       self.basis))  # fmt: skip
+        return {
+            "headline_like_for_like": False,
+            "event": covering.as_dict(),
+            "restated_value": decimal_to_text(value),
+            "inputs": [
+                {
+                    "alias": alias,
+                    "concept": printed.concept,
+                    "period": _label(printed.period),
+                    "period_end": printed.period.end.isoformat(),
+                    "restated_page": self._page_of(printed),
+                    "original_value": decimal_to_text(earlier[alias].value),
+                    "original_fact_id": earlier[alias].fact_id,
+                    "restated_value": decimal_to_text(printed.value),
+                    "restated_fact_id": printed.fact_id,
+                    "restated_filing_id": printed.source_filing_id,
+                }
+                for alias, printed in sorted(swapped.items())
+            ],
+        }
+
+    def _page_of(self, fact: Fact) -> int | None:
+        """The PDF page a fact was read from (the page of its parsed fact's source location)."""
+        if fact.parsed_fact_id is None:
+            return None
+        with transaction(self.engine) as conn:
+            loc = conn.execute(
+                sa.select(tables.parsed_facts.c.source_loc).where(
+                    tables.parsed_facts.c.id == fact.parsed_fact_id
+                )
+            ).scalar()
+        head = (loc or "").split(":")[0]
+        return int(head) if head.isdigit() else None
 
     def _details(self, code: str, acc: _Acc, crossed: list[_Event]) -> dict[str, Any]:
         details: dict[str, Any] = {
@@ -536,7 +653,9 @@ class _Calculation:
             details["restatements"] = [acc.restatements[k] for k in sorted(acc.restatements)]
         return details
 
-    def _sentence(self, acc: _Acc, crossed: list[_Event]) -> str:
+    def _sentence(
+        self, acc: _Acc, crossed: list[_Event], like_for_like: dict[str, Any] | None = None
+    ) -> str:
         """A short human-readable account of the value; the exact flags are in `details`."""
         parts = ["Computed from reported facts."]
         for e in crossed:
@@ -544,6 +663,12 @@ class _Calculation:
             parts.append(
                 f"The input periods straddle the {kind} effective {e.event_date} (event "
                 f"{e.event_id}); earlier periods are on the old basis."
+            )
+        if like_for_like is not None:
+            parts.append(
+                "Not like for like: the earlier period was restated (event "
+                f"{like_for_like['event']['event_id']}); the value on the restated comparative "
+                "is stored in the details."
             )
         if acc.standalone_used:
             parts.append("Uses the standalone figures: the consolidated filings report none.")
@@ -584,13 +709,17 @@ def _load_events(isin: str, engine: Engine | None) -> list[_Event]:
     events = []
     for row in rows:
         details = json.loads(row.details) if row.details else {}
+        filings = {details.get("pdf_filing_id")} | {
+            link.get("pdf_filing_id") for link in details.get("linked_filings", [])
+        }
         events.append(
             _Event(
                 row.id,
                 row.event_type,
                 date.fromisoformat(row.event_date),
-                details.get("basis"),
+                frozenset(event_bases(details)),
                 details.get("citation"),
+                frozenset(f for f in filings if f),
             )
         )
     return events

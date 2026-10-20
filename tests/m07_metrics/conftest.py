@@ -121,8 +121,10 @@ def make_kit(root: Path) -> SimpleNamespace:
             )
         return fact_id
 
-    def event(kind: str, when: str, basis: str | None = None, citation: str = "Note 5") -> int:
-        details = {"citation": citation}
+    def event(
+        kind: str, when: str, basis: str | None = None, citation: str = "Note 5", **extra
+    ) -> int:
+        details = {"citation": citation, **extra}
         if basis:
             details["basis"] = basis
         with transaction() as conn:

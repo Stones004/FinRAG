@@ -142,6 +142,23 @@ def test_per_share_restatement_uses_the_relative_tolerance_only(kit) -> None:
     assert [r.flagged for r in restatements()] == [1]
 
 
+def test_a_zero_eps_filled_in_by_a_revision_is_recorded_but_not_flagged(kit) -> None:
+    """Gabriel Q1 FY26 standalone: the revision only fixes the EPS and face value tags."""
+    kit.add_filing("FIL-1", filed_on="2026-05-01")
+    kit.add_filing("FIL-2", filed_on="2026-05-01")
+    kit.write([kit.cand("FIL-1", "FY", "0", "eps_basic", unit="INR_PER_SHARE")])
+    kit.write(
+        [kit.cand("FIL-2", "FY", "3.88", "eps_basic", unit="INR_PER_SHARE", filed_on="2026-05-01")]
+    )
+    rows = restatements()
+    assert len(rows) == 1 and rows[0].flagged == 0 and rows[0].rel_diff is None
+    kit.add_filing("FIL-3", filed_on="2026-05-02")
+    kit.add_filing("FIL-4", filed_on="2026-05-03")
+    kit.write([kit.cand("FIL-3", "H1", "0", "cfo", filed_on="2026-05-02")])
+    kit.write([kit.cand("FIL-4", "H1", "500000000", "cfo", filed_on="2026-05-03")])
+    assert [r.flagged for r in restatements()][-1] == 1  # money that appears from 0 is flagged
+
+
 def test_series_returns_latest_n_oldest_first(kit) -> None:
     kit.add_filing("FIL-1")
     kit.write([kit.cand("FIL-1", q, v) for q, v in (("Q1", "1"), ("Q2", "2"), ("Q3", "3"))])

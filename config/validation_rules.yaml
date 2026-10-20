@@ -130,6 +130,15 @@ rules:
       - id: balance_sheet
         parts: [total_assets]
         total: total_equity_and_liabilities
+    # The sentence in which a company says its comparatives were restated (scheme of arrangement,
+    # change of policy, correction). A comparative that differs from the original is a corporate
+    # event only if such a sentence is in the filing that printed it, or the identities above hold.
+    restatement_notes:
+      - "(figures|results|numbers|information|amounts)[^.]{0,120}(previous|prior|comparative|earlier)[^.]{0,120}(have been|has been|were|are) restated"
+      - "(previous|prior|comparative|earlier)[^.]{0,80}(figures|periods?|years?)[^.]{0,80}(have been|has been|were|are) restated"
+      - "restated (accordingly|retrospectively)"
+      - "applied retrospectively for all periods"
+      - "pooling of interests?"
 
 # M05 gap-fill gate (owned by facts/gap_gate.py). A PDF/OCR value may fill a gap (be the current
 # value where no XBRL exists) only if its own column passes these identities, named from the

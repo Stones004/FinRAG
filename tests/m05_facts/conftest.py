@@ -66,6 +66,7 @@ def add_filing(
     revision_no: int = 0,
     fmt: str = "xbrl",
     status: str = "parsed",
+    period_end: str = "2026-03-31",
 ) -> None:
     """Insert a filings row."""
     with transaction() as conn:
@@ -79,7 +80,7 @@ def add_filing(
                 revision_no=revision_no,
                 taxonomy_family="indas",
                 basis="consolidated",
-                period_end="2026-03-31",
+                period_end=period_end,
                 filed_on=filed_on,
                 format=fmt,
                 status=status,

@@ -21,6 +21,9 @@ def _claimed_label(candidate: FilingCandidate) -> str | None:
         return None
 
 
+FILING_TYPE_RESULTS = "financial_results"
+
+
 def xbrl_conflicts(candidate: FilingCandidate, meta: XbrlMeta) -> list[Conflict]:
     """Candidate claims vs XBRL content -> every disagreement (empty if consistent)."""
     found: list[Conflict] = []
@@ -84,6 +87,16 @@ def xbrl_conflicts(candidate: FilingCandidate, meta: XbrlMeta) -> list[Conflict]
                 candidate.basis.value,
                 meta.basis.value,
                 f"file is {meta.basis.value}, {candidate.basis.value} claimed",
+            )
+        )
+    if meta.taxonomy_family == "other" and candidate.filing_type == FILING_TYPE_RESULTS:
+        found.append(
+            Conflict(
+                "document_kind",
+                FILING_TYPE_RESULTS,
+                "other",
+                "the file's taxonomy is not a financial-results taxonomy (a governance report "
+                "carries board and committee data, no statements); it is not a results filing",
             )
         )
     return found

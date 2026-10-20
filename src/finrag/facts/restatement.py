@@ -29,11 +29,16 @@ def assess(old: Fact, new: Fact, settings: Settings) -> Difference:
     """Old and new fact -> Difference; flagged only if every applicable tolerance is exceeded.
 
     The absolute tolerance is in rupees, so it applies to INR concepts only; per-share and ratio
-    concepts are judged on the relative tolerance alone.
+    concepts are judged on the relative tolerance alone. An old value of 0 filled in later is
+    flagged for an INR concept (money appeared) but not for a per-share or ratio concept.
     """
     tol = settings.restatement
     abs_diff = abs(new.value - old.value)
     rel_diff = None if old.value == 0 else abs_diff / abs(old.value)
+    if rel_diff is None and new.unit != UNIT_INR:
+        # a per-share or ratio figure that was 0 and is now filled in is a tag correction (a
+        # revision that adds EPS or face value), not a change of what the company reported
+        return Difference(abs_diff, None, False)
     rel_exceeded = rel_diff is None or rel_diff > Decimal(str(tol.relative_tolerance))
     abs_exceeded = new.unit != UNIT_INR or abs_diff > Decimal(tol.absolute_tolerance_inr)
     return Difference(abs_diff, rel_diff, bool(abs_diff) and rel_exceeded and abs_exceeded)

@@ -29,6 +29,7 @@ from finrag.parsing.table_layout import (
 )
 
 BALANCE_SHEET = "balance_sheet"
+_LABEL_LINES_ABOVE_DATES = 2  # header lines above the date line that may hold period-kind labels
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,19 @@ def _kind_labels(
     return labels
 
 
+def _label_lines(lines: Sequence[Line], patterns: SectionPatterns) -> list[Line]:
+    """The header lines that can hold the "Quarter ended" / "Year ended" labels of the columns.
+
+    They sit on or just above the line with the dates. A title further up ("... FOR THE QUARTER
+    AND YEAR ENDED MARCH 31, 2026") also holds those words but labels no column.
+    """
+    # the line of column dates holds several dates; a title mentions at most one
+    dated = [i for i, line in enumerate(lines) if len(date_spans(line.text, patterns)) >= 2]
+    if not dated:
+        return list(lines)
+    return list(lines[max(0, dated[0] - _LABEL_LINES_ABOVE_DATES) : dated[0] + 1])
+
+
 def _runs(line: Line, gap: float) -> list[tuple[Word, ...]]:
     """Split a line into runs of words separated by gaps wider than `gap` (separate cells)."""
     runs: list[list[Word]] = []
@@ -151,7 +165,9 @@ def read_headers(
             if mine:
                 cell_lines.append(Line(mine))
         per_column.append(cell_lines)
-    kinds = _kind_labels(in_region, patterns)
+    kinds = _kind_labels(_label_lines(in_region, patterns), patterns) or _kind_labels(
+        in_region, patterns
+    )
     periods: list[ColumnPeriod] = []
     for index in range(count):
         nearest_first = list(reversed(per_column[index]))  # closest to the data first

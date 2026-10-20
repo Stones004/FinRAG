@@ -225,28 +225,32 @@ def test_gabriel_associates_share_of_pat(eng) -> None:
 # --- a bad OCR column is rejected, not used ------------------------------------------------------
 
 
-def test_netweb_q1_fy26_ocr_column_with_profit_100x_off_is_rejected(eng) -> None:
+def test_netweb_q1_fy26_ocr_column_with_profit_100x_off_never_beats_the_xbrl(eng) -> None:
     """Q2 FY26 results scan, quarter to 30 Jun 2025: profit read as 30,479 (it is 304.79).
 
-    Profit before tax 416.06 less tax 111.27 is 304.79. No XBRL exists for Q1 FY26 (there is no
-    Q1 FY26 filing), so before the gate the 30,479 mn was the current profit. The whole column is
-    rejected: it stays stored, but the current view and the metrics hold nothing for it.
+    Profit before tax 416.06 less tax 111.27 is 304.79. Before the Q1 FY26 XBRL was added (inbox,
+    2026-10-20) there was no Q1 FY26 filing and the gap-fill gate had to reject the whole column
+    so that 30,479 mn was not the current profit. The XBRL now supplies 304.79 mn, which confirms
+    the gate's verdict (the OCR value is exactly 100x), and the scan stays stored but never current.
     """
     period = q(date(2025, 4, 1), date(2025, 6, 30))
-    assert get_fact(NETWEB, "profit_after_tax", period, STAND, engine=eng) is None
-    assert get_fact(NETWEB, "profit_before_tax", period, STAND, engine=eng) is None  # same column
+    pat_now = get_fact(NETWEB, "profit_after_tax", period, STAND, engine=eng)
+    assert pat_now.value == D("304790000") and pat_now.source_class.value == "xbrl"
+    pbt_now = get_fact(NETWEB, "profit_before_tax", period, STAND, engine=eng)
+    assert pbt_now.source_class.value == "xbrl"
     with transaction(eng) as conn:
         stored = {
-            f.concept: f
+            (f.concept, f.source_class.value): f
             for f in load_facts(conn, NETWEB, None, STAND, [period], include_rejected=True)
         }
-    pat = stored["profit_after_tax"]
-    assert pat.value == D("30479000000") and pat.gap_rejected and pat.confidence <= 0.3
-    assert stored["profit_before_tax"].value - stored["tax_expense"].value == D("304790000.00")
-    assert all(f.gap_rejected for f in stored.values())
-    # the metric layer finds nothing to compute from: no row, or an explicit "not computed"
+    ocr = stored[("profit_after_tax", "ocr")]
+    assert ocr.value == D("30479000000") and ocr.gap_rejected and ocr.confidence <= 0.3
+    assert ocr.value / pat_now.value == 100  # a decimal slip, confirmed by the filed number
+    assert stored[("profit_before_tax", "ocr")].value - stored[("tax_expense", "ocr")].value == D(
+        "304790000.00"
+    )
     margin = get_metric(NETWEB, "net_margin", period, STAND, eng)
-    assert margin is None or margin.status is MetricStatus.NOT_COMPUTED
+    assert margin.status is MetricStatus.COMPUTED and D(0) < margin.value < D("0.3")  # not 30x
     # the half year of the same PDF is XBRL-covered (Q2 FY26 filing) and untouched
     h1 = get_fact(
         NETWEB,
@@ -548,3 +552,39 @@ def test_hdfc_cost_to_income_prefers_standalone_and_both_are_computed(eng) -> No
     consolidated = metric(eng, HDFC, "cost_to_income", FY26, CONS)
     assert round(consolidated.value * 100, 2) == D("58.45")
     assert metric(eng, HDFC, "cost_to_income", FY26, STAND).basis_used == STAND
+
+
+# --- Gabriel's growth over the restated Q1 FY26 --------------------------------------------------
+
+Q1_27 = q(date(2026, 4, 1), date(2026, 6, 30))
+
+
+@pytest.mark.parametrize(
+    ("basis", "headline", "restated"),
+    [(CONS, D("1081.26") / D("619.72") - 1, D("1081.26") / D("1054.53") - 1),
+     (STAND, D("759.68") / D("556.71") - 1, D("759.68") / D("596.13") - 1)],
+)  # fmt: skip
+def test_gabriel_q1_fy27_profit_growth_is_shown_on_both_bases_with_the_scheme_named(
+    eng, basis, headline, restated
+) -> None:
+    """The headline is against the profit first filed for Q1 FY26 (619.72 mn consolidated, 556.71
+    standalone); the Q1 FY27 results print Q1 FY26 again after the Scheme (1,054.53 and 596.13)."""
+    v = get_metric(GABRIEL, "pat_growth_yoy", Q1_27, basis, eng)
+    assert v.status is MetricStatus.COMPUTED and abs(v.value - headline) < D("1e-20")
+    found = v.details["like_for_like"]
+    assert found["headline_like_for_like"] is False
+    assert abs(D(found["restated_value"]) - restated) < D("1e-20")
+    assert found["event"]["event_type"] == "comparative_restatement"
+    assert found["event"]["event_date"] == "2026-04-01"
+    assert "Scheme of Arrangement" in found["event"]["citation"]
+    (item,) = found["inputs"]
+    assert (item["period"], item["restated_filing_id"]) == ("Q1 FY26", "FIL-83a2f50f0a6d")
+    assert item["restated_page"] == (7 if basis == CONS else 4)
+    assert "Not like for like" in v.reason
+
+
+def test_growth_not_over_the_restated_period_has_no_like_for_like_figure(eng) -> None:
+    """Q4 FY26 against Q4 FY25 is not touched by the Scheme's comparatives."""
+    q4_26 = q(date(2026, 1, 1), date(2026, 3, 31))
+    v = get_metric(GABRIEL, "pat_growth_yoy", q4_26, CONS, eng)
+    assert v is None or "like_for_like" not in v.details

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 
 import numpy as np
@@ -402,3 +403,128 @@ def test_hdfc_cost_to_income_defaults_to_standalone_and_offers_consolidated(kit)
         "Also on the other basis: [F2] Cost to income ratio, FY26 (Apr 2025–Mar 2026), "
         "consolidated: 58.45%" in answer.text
     )
+
+
+@pytest.mark.parametrize(
+    "ask, first, second",
+    [
+        ("Gabriel operating margin Q1 FY27 consolidated", "consolidated", "standalone"),
+        ("Gabriel operating margin Q1 FY27 standalone", "standalone", "consolidated"),
+    ],
+)
+def test_each_source_line_cites_the_record_of_the_figure_shown_with_its_own_basis(
+    kit, ask, first, second
+) -> None:
+    """Two bases in one answer, in both orders: the ID and the basis of [F1] and [F2] belong to
+    the figure printed under that alias."""
+    ids = {
+        "consolidated": kit.metric(GABRIEL, "operating_margin", "Q1 FY27", D("0.14489")),
+        "standalone": kit.metric(
+            GABRIEL, "operating_margin", "Q1 FY27", D("0.12345"), basis="standalone"
+        ),
+    }
+    shown = {"consolidated": "14.49%", "standalone": "12.35%"}
+    answer = make_service().ask(ask, TODAY)
+    figures = {c.alias: c for c in answer.citations if c.kind == "metric"}
+    assert [figures[a].detail["basis"] for a in ("F1", "F2")] == [first, second]
+    for alias, basis in (("F1", first), ("F2", second)):
+        assert figures[alias].id == ids[basis]
+        assert (
+            f"[{alias}] {ids[basis]} (metric operating_margin, period ending 2026-06-30, {basis})"
+            in answer.text
+        )
+        assert (
+            f"[{alias}] Operating margin, Q1 FY27 (Apr–Jun 2026), {basis}: {shown[basis]}"
+            in answer.text.replace("Also on the other basis: ", "")
+        )
+
+
+def like_for_like_details(kit, basis: str = "consolidated") -> tuple[dict, str, str]:
+    """Stored details of a growth over a restated base: the original and the printed comparative."""
+    original = kit.fact(GABRIEL, "profit_after_tax", "Q1 FY26", 619_720_000, basis=basis)
+    printed_in = kit.filing(GABRIEL, "Q1 FY27", key="pdf")
+    restated = kit.fact(
+        GABRIEL, "profit_after_tax", "Q1 FY26", 1_054_530_000, basis=basis, filing_id=printed_in
+    )
+    with transaction() as conn:  # a native-text PDF column of the Q1 FY27 results
+        conn.execute(
+            sa.update(tables.canonical_facts)
+            .where(tables.canonical_facts.c.fact_id == restated)
+            .values(source_class="pdf")
+        )
+    details = {
+        "code": "computed",
+        "basis_used": basis,
+        "basis_change": [
+            {
+                "event_id": 2,
+                "event_type": "comparative_restatement",
+                "event_date": "2026-04-01",
+                "citation": "Scheme of arrangement",
+            }
+        ],
+        "like_for_like": {
+            "headline_like_for_like": False,
+            "event": {
+                "event_id": 2,
+                "event_type": "comparative_restatement",
+                "event_date": "2026-04-01",
+                "citation": "Scheme of arrangement",
+            },
+            "restated_value": "0.0253",
+            "inputs": [
+                {
+                    "alias": "pat_ly",
+                    "concept": "profit_after_tax",
+                    "period": "Q1 FY26",
+                    "period_end": "2025-06-30",
+                    "restated_page": 7,
+                    "original_value": "619720000",
+                    "original_fact_id": original,
+                    "restated_value": "1054530000.00",
+                    "restated_fact_id": restated,
+                    "restated_filing_id": printed_in,
+                }
+            ],
+        },
+    }
+    return details, original, restated
+
+
+def test_a_growth_over_a_restated_base_shows_both_bases_each_cited_to_its_own_record(kit) -> None:
+    details, original, restated = like_for_like_details(kit)
+    growth = kit.metric(GABRIEL, "pat_growth_yoy", "Q1 FY27", D("0.7448"), details=details)
+    answer = make_service().ask("Gabriel PAT growth Q1 FY27", TODAY)
+    text = answer.text
+    assert "[F1] Profit growth (year on year), Q1 FY27 (Apr–Jun 2026), consolidated: 74.48%" in text
+    assert "Not like for like: the earlier period was restated (a comparative restatement" in text
+    assert "event 2 — Scheme of arrangement" in text
+    assert "Originally filed: Profit for the period, Q1 FY26 61.97 crore [F2]" in text
+    assert (
+        "Against the restated comparative: Profit for the period, Q1 FY26 105.45 crore [F3]" in text
+    )
+    assert "p. 7) → Profit growth (year on year) 2.53%" in text
+    # the generic basis-change line is not repeated for the event that is told in full
+    assert "Basis change:" not in text
+    cited = {c.alias: c for c in answer.citations}
+    assert cited["F1"].id == growth and cited["F2"].id == original and cited["F3"].id == restated
+    assert f"- [F2] {original} (fact profit_after_tax" in text
+    assert f"- [F3] {restated} (fact profit_after_tax" in text
+    assert "comparative column of the results to 2026-06-30" in text.split("[F3]")[-1]
+
+
+def test_the_other_basis_growth_cites_its_own_restated_records(kit) -> None:
+    cons, c_orig, c_rest = like_for_like_details(kit, "consolidated")
+    stand, s_orig, s_rest = like_for_like_details(kit, "standalone")
+    stand["like_for_like"]["restated_value"] = "0.2744"
+    kit.metric(GABRIEL, "pat_growth_yoy", "Q1 FY27", D("0.7448"), details=cons)
+    kit.metric(GABRIEL, "pat_growth_yoy", "Q1 FY27", D("0.3646"), basis="standalone", details=stand)
+    answer = make_service().ask("Gabriel PAT growth Q1 FY27 consolidated", TODAY)
+    cited = {c.alias: c.id for c in answer.citations}
+    originals = re.findall(r"Originally filed: .*? \[(F\d+)\]", answer.text)
+    restated = re.findall(r"Against the restated comparative: .*? \[(F\d+)\]", answer.text)
+    # the consolidated figure and its records first, then the standalone ones
+    assert [cited[a] for a in originals] == [c_orig, s_orig]
+    assert [cited[a] for a in restated] == [c_rest, s_rest]
+    assert "Profit growth (year on year) 2.53%" in answer.text
+    assert "Profit growth (year on year) 27.44%" in answer.text

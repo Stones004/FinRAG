@@ -38,6 +38,7 @@ class Fact:
     confidence: float | None  # of the parsed fact (None for derived facts)
     gap_rejected: bool = False  # refused by the gap-fill gate: stored, never current
     gap_reason: str | None = None
+    filing_period_end: str | None = None  # the period end of the filing that printed this fact
 
     @property
     def key(self) -> tuple[str, str, date, date, str]:
@@ -64,13 +65,31 @@ class Fact:
         return CHAIN_XBRL if self.source_class is SourceClass.XBRL else CHAIN_PDF
 
     @property
+    def is_pdf_comparative(self) -> bool:
+        """True for a native-text PDF column of an earlier period than the filing's own.
+
+        The Q1 FY26 column of the Q1 FY27 results is one. A scanned (OCR) column never is: its
+        digits are too uncertain to stand for what a company later restated, and a column that ends
+        with the filing's own period (a half-year in a Q2 filing) is the company's current report.
+        """
+        return (
+            self.source_class is SourceClass.PDF
+            and self.filing_period_end is not None
+            and self.period.end.isoformat() < self.filing_period_end
+        )
+
+    @property
     def rank(self) -> int:
-        """Source precedence, lower wins: XBRL, XBRL-only derived, PDF/OCR, other derived."""
+        """Source precedence, lower wins: XBRL, XBRL-only derived, PDF, PDF comparative, OCR, other
+        derived. A comparative is a later filing's second printing of a number: it never beats the
+        number printed by the filing of its own period (in XBRL or PDF), it only fills a gap."""
         if self.source_class is SourceClass.XBRL:
             return 0
         if self.source_class is SourceClass.DERIVED:
-            return 1 if self.all_inputs_xbrl else 3
-        return 2
+            return 1 if self.all_inputs_xbrl else 5
+        if self.source_class is SourceClass.OCR:
+            return 4
+        return 3 if self.is_pdf_comparative else 2
 
     @property
     def known_on(self) -> str:

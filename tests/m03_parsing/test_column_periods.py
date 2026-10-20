@@ -18,10 +18,20 @@ from finrag.parsing.pdf_tables import (
     extract_statement_tables,
     ghost_spaces,
     kind_fits,
+    read_headers,
 )
 from finrag.parsing.pdf_text import extract_pdf_text
 from finrag.parsing.sections import load_section_patterns
-from finrag.parsing.table_layout import TableParams, Word, build_table, find_columns, group_lines
+from finrag.parsing.table_layout import (
+    Column,
+    Line,
+    Table,
+    TableParams,
+    Word,
+    build_table,
+    find_columns,
+    group_lines,
+)
 from finrag.parsing.text_quality import load_vocabulary
 
 FS = 8
@@ -232,3 +242,62 @@ def test_narrow_columns_joined_by_stray_numbers_stay_separate_and_noise_is_not_a
     table = build_table(_words(rows), load_section_patterns(), params)
     assert table is not None and len(table.columns) == 4
     assert sum(len(r.cells) == 4 for r in table.rows) >= 12
+
+
+# --- a title that says "quarter and year ended" labels no column ---------------------------------
+
+
+def _line(top: float, cells: list[tuple[str, float, float]]) -> Line:
+    return Line(tuple(Word(text, x0, x1, top, top + 6) for text, x0, x1 in cells))
+
+
+def test_a_title_naming_quarter_and_year_does_not_swap_the_kinds_of_columns_ending_alike() -> None:
+    """Geometry of Gabriel's Q4 FY26 standalone page: a serial-number column, five period columns
+    and a stray one between the fourth and fifth; the title's "QUARTER AND YEAR ENDED" runs over
+    the numeric columns and is nearer to the third column than the real "Year ended" label."""
+    rights = [75.0, 364.0, 411.0, 456.0, 503.0, 529.0, 549.0]
+    table = Table(
+        [Column(r, 10) for r in rights],
+        [],
+        [
+            _line(
+                10,
+                [
+                    ("STATEMENT", 140, 176),
+                    ("QUARTER", 345, 373),
+                    ("AND", 375, 388),
+                    ("YEAR", 390, 405),
+                    ("ENDED", 407, 427),
+                ],
+            ),
+            _line(15, [("(Amount", 500, 519), ("in", 520, 524), ("Rs", 525, 530)]),
+            _line(
+                20,
+                [
+                    ("Quarter", 371, 389),
+                    ("ended", 390, 404),
+                    ("Year", 493, 503),
+                    ("ended", 504, 518),
+                ],
+            ),
+            _line(
+                30,
+                [
+                    ("31.03.2026", 330, 354),
+                    ("31.12.2025", 378, 402),
+                    ("31.03.2025", 424, 448),
+                    ("31.03.2026", 470, 494),
+                    ("31.03.2025", 520, 544),
+                ],
+            ),
+        ],
+    )
+    periods = read_headers(table, load_section_patterns(), "profit_and_loss", 10.0)
+    got = [(p.end, p.kind) for p in periods]
+    assert got[1:5] == [
+        (date(2026, 3, 31), PeriodType.Q),
+        (date(2025, 12, 31), PeriodType.Q),
+        (date(2025, 3, 31), PeriodType.Q),  # the quarter, not a second 2025 year
+        (date(2026, 3, 31), PeriodType.FY),
+    ]
+    assert got[6] == (date(2025, 3, 31), PeriodType.FY)

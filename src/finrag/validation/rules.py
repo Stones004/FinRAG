@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from finrag.core.config import load_registry
 from finrag.core.types import SectorType, ValidationStatus
@@ -114,6 +115,18 @@ class CrossPeriodRule(_Base):
 class CrossSourceRule(_Base):
     type: Literal["cross_source"]
     identities: list[Identity] = []
+    # Regexes (case-insensitive, applied to the whitespace-collapsed text of a native-text PDF)
+    # for the sentence in which a company says its comparative figures were restated. A note that
+    # matches explains a comparative that differs from the original; without one, only identities
+    # that still hold in the PDF can.
+    restatement_notes: list[str] = []
+
+    @field_validator("restatement_notes")
+    @classmethod
+    def _compile(cls, patterns: list[str]) -> list[str]:
+        for pattern in patterns:
+            re.compile(pattern)
+        return patterns
 
     def concepts(self) -> list[str]:
         """Concepts named by the identities (the comparison itself covers every stored key)."""

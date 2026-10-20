@@ -311,7 +311,12 @@ class IntentSettings(_Model):
     auto_proceed_threshold: float = Field(ge=0, le=1)
     clarify_threshold: float = Field(ge=0, le=1)
     default_period: str
+    default_period_confidence: float = Field(ge=0, le=1)
+    unfiled_period_confidence: float = Field(ge=0, le=1)
+    fuzzy_min_chars: int = Field(ge=1)
+    max_last_n_years: int = Field(ge=1)
     multi_entity_enabled: bool
+    explore_min_content_words: int = Field(ge=1)
 
     @model_validator(mode="after")
     def _thresholds(self) -> IntentSettings:
@@ -326,11 +331,33 @@ class AnswerSettings(_Model):
     max_chunks_in_prompt: int = Field(gt=0)
     require_citation_per_sentence: bool
     numeric_check_enabled: bool
+    min_quote_chars: int = Field(gt=0)
+
+
+class QueryRetrievalSettings(_Model):
+    k_candidates: int = Field(gt=0)
+    guidance_quarters: int = Field(gt=0)
+    mmr_lambda: float = Field(ge=0, le=1)
+    explore_min_dense_score: float = Field(ge=0, le=1)
+
+
+class RoutingSettings(_Model):
+    cases: str
+    min_accuracy: float = Field(ge=0, le=1)
 
 
 class QuerySettings(_Model):
     intent: IntentSettings
     answer: AnswerSettings
+    retrieval: QueryRetrievalSettings
+    routing: RoutingSettings
+
+    @model_validator(mode="after")
+    def _candidates(self) -> QuerySettings:
+        """MMR needs more candidates than it keeps."""
+        if self.retrieval.k_candidates < self.answer.max_chunks_in_prompt:
+            raise ValueError("retrieval.k_candidates must be at least answer.max_chunks_in_prompt")
+        return self
 
 
 class LlmSettings(_Model):
@@ -429,6 +456,11 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a mapping at the top level")
     return data
+
+
+def read_yaml(path: Path) -> dict[str, Any]:
+    """Read any YAML data file that must hold a mapping (for data files outside the registries)."""
+    return _read_yaml(path)
 
 
 def _apply_env_overrides(data: dict[str, Any], environ: Mapping[str, str]) -> None:

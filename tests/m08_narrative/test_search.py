@@ -94,8 +94,11 @@ def test_acceptance_5_an_exact_term_is_found_by_keyword_even_with_random_vectors
         ISIN_A, "earnings_call_transcript", "pdf", "Q1FY27", pages=fx.transcript_pages(), key="o"
     )
     run_index(embedder=embedder)
-    hits = _search(embedder, isin=ISIN_A, query_text="Zorblax", k=3)
-    assert "Zorblax" in hits[0].text and hits[0].scores["bm25"] > 0
+    hits = _search(embedder, isin=ISIN_A, query_text="Zorblax", k=6)
+    # the term is in the analyst's question; its answer is indexed together with that question
+    # (and may rank first), so the question chunk itself must be among the hits
+    assert hits[0].scores["bm25"] > 0
+    assert any("Zorblax" in h.text for h in hits)
 
 
 def test_hits_carry_what_a_citation_needs(corpus, embedder) -> None:
@@ -177,3 +180,20 @@ def test_acceptance_6_paraphrase_with_the_real_model(db: None, fx, add_filing, m
         embedder, isin=ISIN_A, query_text="how will the business pay for new equipment", k=3
     )
     assert any("capex" in h.text.lower() for h in hits)
+
+
+def test_a_speaker_role_filter_keeps_only_those_turns(corpus, embedder) -> None:
+    """Added with M09: 'what did management say' must not return an analyst's turn."""
+    everyone = _search(embedder, isin=ISIN_A, query_text="margin", source_types=["transcript"])
+    roles = {h.speaker_role for h in everyone}
+    assert "management" in roles and len(roles) > 1, roles
+    for wanted in roles:
+        only = _search(
+            embedder,
+            isin=ISIN_A,
+            query_text="margin",
+            source_types=["transcript"],
+            speaker_roles=[wanted],
+        )
+        assert only and {h.speaker_role for h in only} == {wanted}
+    assert _search(embedder, isin=ISIN_A, query_text="margin", speaker_roles=["nobody"]) == []

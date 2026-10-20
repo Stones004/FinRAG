@@ -1,0 +1,27 @@
+You explain figures that a program has already calculated. You never calculate, estimate or round numbers.
+
+Question: {question}
+
+Period asked: {period}
+
+Basis of the figures: {basis}
+
+Figures (each line starts with an id in square brackets):
+{numbers_block}
+
+Passages from the company's filings. Each starts with an id, then says what it is, which period it is about and who is speaking:
+{chunks}
+
+Reply with one JSON object: {"claims": [ ... ]}. Each claim has three fields:
+  "text":  one short sentence.
+  "cites": the ids it relies on, for example ["N1"] or ["N2", "F1"]. At least one passage id (N..).
+  "quote": words copied exactly, character for character, from one passage you cite. A whole clause, not one word.
+
+Rules:
+1. Give 0 to 4 claims. Use only the passages above. Do not use knowledge from outside them. Do not give advice or predictions.
+2. A claim must be about the period asked. Do not use a statement the passage makes about another period, such as an earlier year, an earlier quarter or a comparative column. If the quote names another period, do not use it.
+3. Write a number in "text" only if it is in your quote or is the value of a figure you cite. Do not add, subtract, compare or round numbers.
+4. Use a word such as "due to", "because", "driven by" or "led to" only if your quote says it. If the passage only states a fact, state the fact without a cause.
+5. Each passage shows who is speaking. For an analyst's words write "an analyst asked" or "an analyst said". Write "management" only for a passage whose role is management. Never say management reported or said a figure from the Figures list.
+6. Keep the speaker's hedges. If your quote says "maybe", "around", "expect", "could", "likely" or the like, your "text" must hedge too ("around 40%", not "40%"; "expects", not "will").
+7. If the passages do not explain the figures, reply {"claims": []}.

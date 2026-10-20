@@ -20,7 +20,7 @@ def test_real_settings_load_and_paths_resolve_against_root(isolated_repo: Path) 
     settings = get_settings()
     assert settings.paths.db == isolated_repo / "data" / "finrag.db"
     assert settings.fiscal.fy_start_month == 4
-    assert settings.llm.model == ""  # blank [VERIFY] values are valid at load time
+    assert isinstance(settings.llm.model, str)  # a [VERIFY] value may be blank or filled in
 
 
 def test_settings_are_cached_until_reset() -> None:

@@ -1,0 +1,382 @@
+# Routing set (M09 acceptance 1): 81 questions about the watch list with the intent they must give.
+#
+# Rules of use
+#   * Cases marked `held_out: true` (28) are never used to tune intents.yaml, the resolvers or the
+#     classifier prompt. Tune against the others only; report held-out accuracy separately.
+#   * `today` is the date the relative periods are resolved against; `latest_periods` is what the
+#     real database holds (latest quarter, fiscal year) so the set is also run by the stubbed
+#     tests without a database.
+#   * expect.isin is the NSE symbol (GABRIEL, HDFCBANK, NETWEB), mapped to the ISIN by the runner.
+#   * expect.metrics: metric IDs from metrics.yaml or taxonomy concept IDs.
+#   * expect.periods: period labels, or "latest" (no period named: the default is applied).
+#   * expect.forward_looking: true = a guidance / outlook question (narrative over the latest calls); expect.horizon:
+#     the future periods it names (not filed, so they are not evidence); expect.periods are then the last actuals shown.
+#   * expect.exploratory: true = no metric and no cue, searched in the filed results text (all sections, audit text included).
+#   * expect.comparison: yoy | sequential | periods (two named periods) | trend | basis.
+#   * expect.decision: confirm = answer but ask "Is this right?" (confidence between the
+#     thresholds). Without it, proceed or confirm both pass.
+#   * clarify: <reason> = the parser must return a Clarification, not an intent.
+#   * A wrong intent shown above auto_proceed_threshold is "wrong-confident" and must be 0.
+version: 1
+today: 2026-10-19
+latest_periods: { quarter: "Q1 FY27", fiscal_year: "FY26" }
+
+cases:
+  # ------------------------------------------------------------------ clean lookups
+  - id: R01
+    q: "What was Gabriel's operating margin in Q1 FY27?"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: lookup }
+  - id: R02
+    q: "What was HDFC Bank's net interest income in FY26?"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [nii], periods: ["FY26"], question_type: lookup }
+  - id: R03
+    q: "Show me Netweb's revenue growth for FY26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue_growth_yoy], periods: ["FY26"], question_type: lookup }
+  - id: R04
+    q: "How much was Gabriel's free cash flow in FY26?"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [fcf], periods: ["FY26"], question_type: lookup }
+  - id: R05
+    q: "What is the current ratio of Netweb for FY26?"
+    held_out: true
+    expect: { isin: NETWEB, metrics: [current_ratio], periods: ["FY26"], question_type: lookup }
+  - id: R06
+    q: "What was revenue for Netweb in Q4 FY26?"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue], periods: ["Q4 FY26"], question_type: lookup }
+  - id: R07
+    q: "Show me HDFC Bank's gross NPA ratio for Q1 FY27"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [gross_npa_ratio], periods: ["Q1 FY27"], question_type: lookup }
+  - id: R08
+    q: "What was Gabriel's PAT in H1 FY26?"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [profit_after_tax], periods: ["H1 FY26"], question_type: lookup }
+
+  # ------------------------------------------------------------------ abbreviations, terse phrasing
+  # (a bare metric question with no explanation or guidance cue is a lookup, per intents.yaml; changed 2026-10-20)
+  - id: R09
+    q: "gabriel opm q1 fy27"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: lookup }
+  - id: R10
+    q: "HDFC GNPA latest"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [gross_npa_ratio], periods: [latest], question_type: lookup }
+  - id: R11
+    q: "netweb ebitda margin fy26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [ebitda_margin], periods: ["FY26"], question_type: lookup }
+  - id: R12
+    q: "HDFC CD ratio Q4 FY26"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [credit_deposit_ratio], periods: ["Q4 FY26"], question_type: lookup }
+  - id: R13
+    q: "what's HDFC's NII for 9M FY26"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [nii], periods: ["9M FY26"], question_type: lookup }
+  - id: R14
+    q: "gabriel dso fy26"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [dso], periods: ["FY26"], question_type: lookup }
+  - id: R15
+    q: "Netweb OPM Q2 FY26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [operating_margin], periods: ["Q2 FY26"], question_type: lookup }
+  - id: R16
+    q: "HDFC NNPA Q1 FY27"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [net_npa_ratio], periods: ["Q1 FY27"], question_type: lookup }
+
+  # ------------------------------------------------------------------ typos
+  - id: R17
+    q: "gabrel oparating margin q1 fy27"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: lookup }
+  - id: R18
+    q: "hdfc bnak cost to incom FY26"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [cost_to_income], periods: ["FY26"], question_type: lookup }
+  - id: R19
+    q: "netwab revnue growth fy26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue_growth_yoy], periods: ["FY26"], question_type: lookup, decision: confirm }
+  - id: R20
+    q: "what was gabriel's ebidta in FY26"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [ebitda], periods: ["FY26"], question_type: lookup, decision: confirm }
+  - id: R21
+    q: "HDFC advnces growth FY26"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [advances_growth_yoy], periods: ["FY26"], question_type: lookup }
+  - id: R22
+    q: "netweb free cashflow FY26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [fcf], periods: ["FY26"], question_type: lookup }
+
+  # ------------------------------------------------------------------ relative periods (today = 2026-10-19)
+  # "last quarter" is Q2 FY27, which is not filed: the data's latest quarter (Q1 FY27) is shown, the
+  # interpretation line says so, and the answer asks "Is this right?".
+  - id: R23
+    q: "How did Netweb's PAT do last quarter?"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [profit_after_tax], periods: ["Q1 FY27"], question_type: lookup, decision: confirm }
+  - id: R24
+    q: "Gabriel ROCE last year"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [roce], periods: ["FY26"], question_type: lookup }
+  - id: R25
+    q: "show me HDFC credit cost over the last 3 years"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [credit_cost], periods: ["FY24", "FY25", "FY26"], question_type: comparison, comparison: trend }
+  - id: R26
+    q: "what was Netweb's operating margin last quarter"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: lookup, decision: confirm }
+  - id: R27
+    q: "Gabriel revenue growth vs last quarter"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [revenue_growth_yoy], periods: [latest], question_type: comparison, comparison: sequential }
+  - id: R28
+    q: "HDFC deposits growth last year"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [deposits_growth_yoy], periods: ["FY26"], question_type: lookup }
+
+  # ------------------------------------------------------------------ comparison and trend
+  - id: R29
+    q: "Compare Gabriel's FY26 and FY25 EBITDA margin"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [ebitda_margin], periods: ["FY26", "FY25"], question_type: comparison, comparison: periods }
+  - id: R30
+    q: "Netweb FY26 vs FY25 revenue growth"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue_growth_yoy], periods: ["FY26", "FY25"], question_type: comparison, comparison: periods }
+  - id: R31
+    q: "HDFC Bank NII trend over the last 3 years"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [nii], periods: ["FY24", "FY25", "FY26"], question_type: comparison, comparison: trend }
+  - id: R32
+    q: "gabriel operating margin yoy for Q1 FY27"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: comparison, comparison: yoy }
+  - id: R33
+    q: "netweb qoq PAT Q1 FY27"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [profit_after_tax], periods: ["Q1 FY27"], question_type: comparison, comparison: sequential }
+  - id: R34
+    q: "change in HDFC cost to income ratio FY26 vs FY25"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [cost_to_income], periods: ["FY26", "FY25"], question_type: comparison, comparison: periods }
+
+  # ------------------------------------------------------------------ explanation and narrative
+  - id: R35
+    q: "Why did Gabriel's PAT jump in Q1 FY27?"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [profit_after_tax], periods: ["Q1 FY27"], question_type: explanation }
+  - id: R36
+    q: "What did HDFC management say about asset quality in Q1 FY27?"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [gross_npa_ratio], periods: ["Q1 FY27"], question_type: narrative }
+  - id: R37
+    q: "Explain the fall in Netweb operating margin in Q4 FY26"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [operating_margin], periods: ["Q4 FY26"], question_type: explanation }
+  - id: R38
+    q: "What caused the change in Gabriel's CFO in FY26?"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [cfo], periods: ["FY26"], question_type: explanation }
+  # R39 changed 2026-10-20: FY27 is not filed, so it is the horizon of the guidance, not the evidence period.
+  - id: R39
+    q: "Netweb guidance for FY27"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [], periods: [latest], question_type: narrative, forward_looking: true, horizon: ["FY27"] }
+  - id: R40
+    q: "What did the auditor say in Gabriel's Q1 FY27 review report?"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [], periods: ["Q1 FY27"], question_type: narrative, sections: [auditor_report] }
+
+  # ------------------------------------------------------------------ basis cues
+  - id: R41
+    q: "HDFC Bank standalone gross NPA ratio Q1 FY27"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [gross_npa_ratio], periods: ["Q1 FY27"], question_type: lookup, basis: standalone }
+  - id: R42
+    q: "Gabriel consolidated vs standalone operating margin FY26"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["FY26"], question_type: comparison, comparison: basis }
+  - id: R43
+    q: "HDFC Bank cost to income consolidated FY26"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [cost_to_income], periods: ["FY26"], question_type: lookup, basis: consolidated }
+  - id: R44
+    q: "What is Netweb's standalone ROE for FY26?"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [roe], periods: ["FY26"], question_type: lookup, basis: standalone }
+
+  # ------------------------------------------------------------------ not applicable, not indexed
+  - id: R45
+    q: "What is HDFC Bank's operating margin in FY26?"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [operating_margin], periods: ["FY26"], question_type: lookup }
+  - id: R46
+    q: "netweb gross NPA"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [gross_npa], periods: [latest], question_type: lookup }
+  - id: R47
+    q: "What are Gabriel's contingent liabilities?"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [], periods: [latest], question_type: narrative, unavailable_sources: [contingent] }
+  - id: R48
+    q: "Is there any key audit matter in HDFC's FY26 audit?"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [], periods: ["FY26"], question_type: narrative, unavailable_sources: [key_audit_matters] }
+
+  # ------------------------------------------------------------------ added 2026-10-20 (found with --explain-plan)
+  # A period that ends after the latest filed one is "not available yet" unless the question is about
+  # guidance (then it is the horizon). A period before the data starts is answered "no data", not refused.
+  - id: R49
+    q: "Gabriel FY19 revenue"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [revenue], periods: ["FY19"], question_type: lookup }
+  - id: G01
+    q: "What is Netweb's capex plan for FY28?"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [capex_ppe], periods: [latest], question_type: narrative, forward_looking: true, horizon: ["FY28"] }
+  - id: G02
+    q: "What is HDFC's outlook on credit growth?"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [advances_growth_yoy], periods: [latest], question_type: narrative, forward_looking: true }
+  - id: G03
+    q: "Does Gabriel management expect margins to improve in Q2 FY27?"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [], periods: [latest], question_type: narrative, forward_looking: true, horizon: ["Q2 FY27"] }
+  - id: G04
+    q: "netweb revenue guidance going forward"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue], periods: [latest], question_type: narrative, forward_looking: true }
+
+  # ------------------------------------------------------------------ must clarify
+  - id: C01
+    q: "what's the operating margin?"
+    held_out: false
+    clarify: no_entity
+  - id: C02
+    q: "show me ROE for last year"
+    held_out: false
+    clarify: no_entity
+  - id: C03
+    q: "gabriel margin"
+    held_out: false
+    clarify: ambiguous_metric
+  - id: C04
+    q: "compare Gabriel and Netweb ROE"
+    held_out: true
+    clarify: multi_entity
+  - id: C05
+    q: "Reliance revenue FY26"
+    held_out: false
+    clarify: unknown_company
+  - id: C06
+    q: "Gabriel Sharpe ratio"
+    held_out: false
+    clarify: unknown_metric
+  - id: C07
+    q: "how is HDFC doing?"
+    held_out: true
+    clarify: missing_metric
+  - id: C08
+    q: "last quarter results"
+    held_out: false
+    clarify: no_entity
+  - id: C09
+    q: "What is Netweb's revenue for FY28?"
+    held_out: false
+    clarify: period_not_available
+  - id: C10
+    q: "Gabriel operating margin Q2 FY27"
+    held_out: true
+    clarify: period_not_available
+  - id: C11
+    q: "HDFC NII H1 FY28"
+    held_out: false
+    clarify: period_not_available
+  - id: C12
+    q: "Compare Gabriel's FY27 and FY26 EBITDA margin"
+    held_out: false
+    clarify: period_not_available
+
+  # ------------------------------------------------------------------ added 2026-10-20 (live runs with Qwen3-4B)
+  # No explanation or guidance cue -> a lookup (figures only); "growth" -> the year-on-year growth metric;
+  # "what did management say" -> management's own turns only.
+  - id: L01
+    q: "HDFC loans growth FY26"
+    held_out: false
+    expect: { isin: HDFCBANK, metrics: [advances_growth_yoy], periods: ["FY26"], question_type: lookup }
+  - id: L02
+    q: "Netweb turnover growth FY26"
+    held_out: true
+    expect: { isin: NETWEB, metrics: [revenue_growth_yoy], periods: ["FY26"], question_type: lookup }
+  - id: L08
+    q: "Gabriel profit after tax growth FY26"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [pat_growth_yoy], periods: ["FY26"], question_type: lookup }
+  - id: L03
+    q: "Gabriel operating margin driver Q1 FY27"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [operating_margin], periods: ["Q1 FY27"], question_type: explanation }
+  - id: L04
+    q: "how come Netweb PAT fell in Q1 FY27"
+    held_out: true
+    expect: { isin: NETWEB, metrics: [profit_after_tax], periods: ["Q1 FY27"], question_type: explanation }
+  - id: L05
+    q: "Netweb commentary on revenue Q1 FY27"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [revenue], periods: ["Q1 FY27"], question_type: narrative }
+  - id: L06
+    q: "what did HDFC management say about deposits"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [bank_deposits], periods: [latest], question_type: narrative, management_only: true }
+  - id: L07
+    q: "Why did Gabriel's PAT jump in Q1 FY27?"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [profit_after_tax], periods: ["Q1 FY27"], question_type: explanation, management_only: false }
+
+  # ------------------------------------------------------------------ added 2026-10-20: no metric, no cue
+  # A question with distinctive words of its own is searched in the filed results text (exploratory);
+  # one without ("how is HDFC doing?", C07) is still asked about. Whether the search finds anything
+  # close enough is decided after retrieval, so the parser-only routing test does not cover that.
+  - id: E01
+    q: "What scheme of arrangement affected Gabriel's Q1 FY27 results?"
+    held_out: false
+    expect: { isin: GABRIEL, metrics: [], periods: ["Q1 FY27"], question_type: narrative, exploratory: true }
+  - id: E02
+    q: "Netweb overseas acquisition rationale"
+    held_out: false
+    expect: { isin: NETWEB, metrics: [], periods: [latest], question_type: narrative, exploratory: true }
+  - id: E03
+    q: "Anchemco merger impact on Gabriel"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [], periods: [latest], question_type: narrative, exploratory: true }
+  - id: E04
+    q: "Did HDFC Bank disclose any litigation settlement?"
+    held_out: true
+    expect: { isin: HDFCBANK, metrics: [], periods: [latest], question_type: narrative, exploratory: true }
+  - id: E05
+    q: "Which tribunal approved Gabriel's amalgamation"
+    held_out: true
+    expect: { isin: GABRIEL, metrics: [], periods: [latest], question_type: narrative, exploratory: true }
+  - id: E06
+    q: "tell me about Netweb"
+    held_out: true
+    clarify: missing_metric
+  - id: E07
+    q: "how are Gabriel's results looking"
+    held_out: false
+    clarify: missing_metric
+  - id: E08
+    q: "what is going on with HDFC Bank"
+    held_out: true
+    clarify: missing_metric

@@ -80,7 +80,12 @@ def test_acceptance_14_speakers_on_transcript_chunks_only(corpus, chunk_rows) ->
             r.speaker is None and r.speaker_role is None for r in _rows(corpus, chunk_rows, key)
         )
     qa = [r for r in _rows(corpus, chunk_rows, "a_q4") if r.section == "qa"]
-    assert qa and all(json.loads(r.meta_json).get("firm") for r in qa)
+    assert qa
+    # the firm is the analyst's: on the analyst's turns only, never on management's replies
+    for r in qa:
+        has_firm = bool(json.loads(r.meta_json).get("firm"))
+        assert has_firm == (r.speaker_role == "analyst")
+    assert {r.speaker_role for r in qa} == {"analyst", "management"}
 
 
 def test_acceptance_7_reindexing_creates_no_duplicates(corpus, chunk_rows, embedder) -> None:

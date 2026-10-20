@@ -76,9 +76,20 @@ def replace_for_filing(
 
 
 def texts_for_isin(conn: Connection, isin: str) -> list[tuple[str, str]]:
-    """All (chunk_id, text) of one ISIN, in chunk_id order (the order of the indexes)."""
+    """All (chunk_id, index text) of one ISIN, in chunk_id order (the order of the indexes).
+
+    The index text of a Q&A answer starts with the question it answers (kept in the chunk's
+    metadata), because a reply such as "it was 70 bps" is only findable through its question. The
+    stored and returned chunk text is the reply alone: what is quoted is what was said.
+    """
     c = tables.chunks
     rows = conn.execute(
-        sa.select(c.c.chunk_id, c.c.text).where(c.c.isin == isin).order_by(c.c.chunk_id)
+        sa.select(c.c.chunk_id, c.c.text, c.c.meta_json)
+        .where(c.c.isin == isin)
+        .order_by(c.c.chunk_id)
     )
-    return [(r.chunk_id, r.text) for r in rows]
+    out = []
+    for r in rows:
+        question = json.loads(r.meta_json).get("question") if r.meta_json else None
+        out.append((r.chunk_id, f"{question} {r.text}" if question else r.text))
+    return out

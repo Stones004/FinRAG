@@ -1,0 +1,143 @@
+# FinRAG intents (M09): question-type keywords, period patterns, comparison words, synonyms for taxonomy
+# concepts, section hints. Owned by M09; validated by finrag.query.intents at load time.
+# Matching is on the lower-cased question with punctuation and possessives removed ("gabriel's" -> "gabriel").
+version: 1
+
+# The first type (in this order) with a keyword match wins: "what was the reason for ..." is an explanation.
+# A question with a metric and none of the explanation / narrative words below is a LOOKUP: the figure only,
+# no narrative search and no LLM call ("HDFC GNPA latest").
+question_type_order: [explanation, narrative, comparison, lookup]
+question_types:
+  lookup:      ["what is", "what was", "what are", "how much", "show me", "value of"]
+  comparison:  ["compare", " vs ", "versus", "trend", "over the last", "change in"]
+  explanation: ["why", "explain", "reason", "driver", "drivers", "cause", "caused", "what caused", "what drove", "how come", "due to"]
+  narrative:   ["what did management say", "management", "mgmt", "say about", "said about", "said", "mention", "mentioned", "mentions", "guidance", "outlook", "commentary", "auditor"]
+default_question_type_with_metric: lookup
+# Questions about what management said: retrieval is limited to management's own turns in the calls (not the
+# analysts' questions) and the answer may say "management" only for those. Forward-looking questions are
+# management-only as well.
+management_words: ["management", "mgmt", "say about", "said about"]
+management_speaker_roles: [management]   # the speaker_role values of the transcript chunks that are management turns
+# How a claim may name who said something: "management" only for management's own turns, "analyst" for an analyst's.
+speaker_terms:
+  management: ["management", "mgmt"]
+  analyst:    ["analyst", "analysts"]
+# Words that make a claim causal: a claim using one needs a quote that says it too.
+causal_words: ["due to", "because", "driven by", "on account of", "led to", "owing to", "as a result of", "resulted in", "attributable to", "thanks to", "caused by", "result of", "reason for", "reason is"]
+# Words that soften a statement. A quote that contains one of them may be turned into a claim only if
+# the claim keeps a hedge of its own ("around 40%" must not become "40%"). "may" is not counted in a date
+# ("May 11, 2026"); "expected" is left out on purpose ("expected credit loss" is a bank term).
+hedge_words: ["maybe", "perhaps", "probably", "possibly", "likely", "unlikely", "roughly", "approximately", "approx", "around", "may", "might", "could", "should", "expect", "expects", "expecting", "anticipate", "anticipates", "hope", "hopefully", "believe", "believes", "tentatively", "broadly", "somewhere", "close to", "in the range of"]
+# Words that do not make a question searchable. A question with no metric and no cue is searched in the
+# filed results text only if it keeps at least query.intent.explore_min_content_words other words after the
+# company, period, starters and these are removed ("how is HDFC doing?" keeps none, so it is asked about).
+explore_stopwords: ["a", "an", "the", "of", "in", "on", "at", "to", "for", "from", "by", "with", "about", "as", "and", "or", "not", "no", "it", "its", "this", "that", "these", "those", "their", "they", "there", "here", "he", "she", "we", "you", "i", "me", "my", "us", "our", "your", "any", "some", "anything", "something", "everything", "thing", "things", "much", "many", "more", "most", "less", "very", "also", "just", "so", "than", "then", "be", "been", "being", "is", "are", "was", "were", "am", "do", "does", "did", "doing", "done", "have", "has", "had", "having", "will", "would", "can", "could", "should", "may", "might", "tell", "say", "said", "show", "give", "get", "got", "going", "go", "goes", "performing", "performance", "perform", "looking", "look", "looks", "happen", "happened", "happening", "result", "results", "quarter", "quarterly", "year", "annual", "period", "latest", "recent", "recently", "last", "previous", "current", "company", "companys", "business", "firm", "bank", "new", "news", "update", "updates", "information", "info", "detail", "details", "number", "numbers", "figure", "figures", "report", "reported", "filing", "filings", "statement", "statements", "financial", "finance", "good", "bad", "well", "fine", "okay", "ok", "think", "know", "want", "need", "like", "please", "now", "today", "still", "again", "ever", "yet", "why", "how", "what", "which", "who", "whom", "when", "where", "whether", "if", "vs", "versus"]
+
+# Forward-looking words: the question is about what management plans or expects, which no filed number
+# answers. It becomes a narrative question over the latest earnings calls; the numbers shown are the last
+# actuals, labelled as such. ("expected" is left out on purpose: "expected credit loss" is a bank term.)
+forward_words: ["plan", "plans", "outlook", "guidance", "expect", "expects", "target", "targets", "will", "going forward", "forecast"]
+default_question_type_with_section_hint: narrative   # no keyword, no metric, but a section hint or an unavailable source
+llm_confidence_map: { high: 0.9, medium: 0.7, low: 0.5 }
+
+# Words that open a question; never read as a company name.
+question_starters: [show, what, whats, why, how, hows, is, are, was, were, compare, explain, tell, give, does, did, can, list, which, who, when, where, describe, has, have]
+contractions: { "what's": "what is", "whats": "what is", "how's": "how is" }
+latest_words: ["latest", "most recent"]   # name no period on purpose: the default period is used
+
+basis_words:
+  consolidated: ["consolidated", "consol", "group"]
+  standalone:   ["standalone", "stand alone"]
+
+period_patterns:          # regex -> handler name in period_resolver
+  - { regex: "\\bq([1-4])\\s*fy\\s*'?(\\d{2,4})\\b", kind: quarter }
+  - { regex: "\\bh([12])\\s*fy\\s*'?(\\d{2,4})\\b",  kind: half }
+  - { regex: "\\b9m\\s*fy\\s*'?(\\d{2,4})\\b",       kind: nine_months }
+  - { regex: "\\bfy\\s*'?(\\d{2,4})\\b",             kind: fiscal_year }
+  - { regex: "\\blast\\s+(\\d+)\\s+years?\\b",       kind: last_n_years }
+  - { regex: "\\blast quarter\\b",                   kind: last_quarter }
+  - { regex: "\\blast year\\b",                      kind: last_fiscal_year }
+
+comparison_words:         # removed from the text before period_patterns run ("vs last quarter" is a comparison, not a period)
+  yoy:        ["year on year", "yoy", "vs last year", "compared to last year"]
+  sequential: ["qoq", "quarter on quarter", "sequential", "vs last quarter"]
+  basis:      ["consolidated vs standalone", "standalone vs consolidated", "consolidated and standalone", "standalone and consolidated"]
+# Two named periods give comparison "periods"; last_n_years or "trend" give "trend".
+trend_words: ["trend", "over the last"]
+
+# "growth" with a metric that has a year-on-year growth metric reads as that metric ("HDFC loans growth").
+# A word that is not a growth metric's own synonym ("loans", "revenue") would otherwise win on its own.
+growth_words: ["growth", "grew", "growing"]
+growth_counterparts:      # concept or metric -> its year-on-year growth metric
+  revenue: revenue_growth_yoy
+  profit_after_tax: pat_growth_yoy
+  bank_advances: advances_growth_yoy
+  bank_deposits: deposits_growth_yoy
+
+# Taxonomy concepts a user may ask for directly. The taxonomy has no synonyms of its own (checked
+# 2026-10-19). A longer metric synonym wins over a concept synonym ("pat growth" over "pat").
+concept_synonyms:
+  revenue:          ["revenue", "revenue from operations", "sales", "turnover", "topline"]
+  total_income:     ["total income"]
+  other_income:     ["other income"]
+  employee_expense: ["employee expense", "employee cost", "staff cost"]
+  finance_cost:     ["finance cost", "interest cost"]
+  depreciation_amortisation: ["depreciation", "d&a"]
+  profit_before_tax: ["pbt", "profit before tax"]
+  tax_expense:      ["tax expense"]
+  profit_after_tax: ["pat", "profit after tax", "net profit", "profit for the period", "profit"]
+  share_of_associates_jv: ["associates"]
+  eps_basic:        ["eps", "earnings per share", "basic eps"]
+  eps_diluted:      ["diluted eps"]
+  cfo:              ["cfo", "operating cash flow", "cash flow from operations", "cash from operations"]
+  cfi:              ["cfi", "investing cash flow"]
+  cff:              ["cff", "financing cash flow"]
+  capex_ppe:        ["capex", "capital expenditure"]
+  total_assets:     ["total assets"]
+  total_equity:     ["total equity", "net worth", "shareholders funds"]
+  inventories:      ["inventory", "inventories"]
+  cash_and_equivalents: ["cash and equivalents", "cash balance"]
+  bank_deposits:    ["deposits"]
+  bank_advances:    ["advances", "loans"]
+  bank_operating_profit_before_provisions: ["ppop", "pre provision operating profit"]
+
+# Figures shown beside a metric when the question asks WHY (explanation): each is fetched for the same
+# period and basis and kept only if it is not zero. Gabriel Q1 FY27: 40 % of profit is the share of
+# associates, which the filings tag as 0 in every earlier period.
+companions:
+  profit_after_tax: [profit_continuing_ops, share_of_associates_jv, associates_share_of_pat]
+  pat_growth_yoy:   [profit_after_tax, share_of_associates_jv, associates_share_of_pat]
+
+section_hints:            # words that narrow narrative search to sections (v1 indexes results_notes, segment_notes, audit_opinion, auditor_report and the transcript sections)
+  audit_opinion:  ["audit opinion", "qualified", "unmodified"]
+  auditor_report: ["auditor", "limited review", "review report"]
+  segment_notes:  ["segment"]
+  results_notes:  ["notes to the results"]
+  press_release:  ["asset quality", "npa", "press release", "deposits", "advances"]   # HDFC's news release is indexed as press_release
+  # not indexed in v1 (annual reports deferred): a match sets Plan.unavailable_sources
+  related_party:  ["related party"]
+  contingent:     ["contingent"]
+  mdna:           ["management discussion", "md&a"]
+  key_audit_matters: ["key audit matter"]
+  caro:           ["caro"]
+  accounting_policies: ["accounting policy", "accounting policies"]
+
+# Results sections searched for an explanation when the question names none. The auditor's report and
+# opinion are left out: they are boilerplate about the audit, and a "why" answered from them is wrong.
+# They are searched when the question is about the audit (the section hints above).
+default_results_sections: [results_notes, segment_notes, press_release]
+audit_sections: [audit_opinion, auditor_report]
+
+# Hints that name a topic, not a document part: the section is added to the results search but the
+# transcripts are still searched first. Every other available hint searches only that results section.
+topical_section_hints: [press_release]
+
+# Section hints that name a source M09 cannot search in v1.
+unavailable_sections: [related_party, contingent, mdna, key_audit_matters, caro, accounting_policies]
+unavailable_names:        # how the answer names them
+  related_party: "related-party disclosures"
+  contingent: "contingent liabilities"
+  mdna: "management discussion and analysis"
+  key_audit_matters: "key audit matters"
+  caro: "the CARO annexure"
+  accounting_policies: "the full accounting policies"

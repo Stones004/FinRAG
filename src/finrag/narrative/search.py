@@ -34,6 +34,7 @@ class SearchRequest:
     fiscal_years: list[str] | None = None
     source_types: list[str] | None = None
     k: int | None = None
+    speaker_roles: list[str] | None = None  # transcript turns by these roles only (e.g. management)
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,8 @@ def _filters(request: SearchRequest) -> list[Any]:
         conditions.append(c.c.fiscal_year.in_(request.fiscal_years))
     if request.source_types:
         conditions.append(c.c.source_type.in_(request.source_types))
+    if request.speaker_roles:
+        conditions.append(c.c.speaker_role.in_(request.speaker_roles))
     if request.periods is not None:
         conditions.append(
             sa.or_(
@@ -97,6 +100,8 @@ def _matches(row: sa.Row, request: SearchRequest) -> bool:
     if request.fiscal_years and row.fiscal_year not in request.fiscal_years:
         return False
     if request.source_types and row.source_type not in request.source_types:
+        return False
+    if request.speaker_roles and row.speaker_role not in request.speaker_roles:
         return False
     if request.periods is not None:
         return any(

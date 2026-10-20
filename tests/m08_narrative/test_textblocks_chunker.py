@@ -152,29 +152,53 @@ def _qa_unit(answer_words: int) -> TranscriptUnit:
     )
 
 
-def test_acceptance_13_a_question_stays_with_its_answer(narrative_settings) -> None:
-    chunks = chunk_transcript_unit(_qa_unit(4), narrative_settings, {})
-    assert len(chunks) == 1
-    assert chunks[0].text.startswith("Question (Ravi Menon, Alpha Capital): What drove")
-    assert "Answer (Asha Rao, Chief Financial Officer):" in chunks[0].text
-    assert (chunks[0].speaker, chunks[0].speaker_role, chunks[0].page) == (
-        "Ravi Menon",
-        "analyst",
-        3,
+def test_acceptance_13_a_qa_unit_is_cut_by_turn_and_each_chunk_has_one_speaker(
+    narrative_settings,
+) -> None:
+    question, answer, follow_up = chunk_transcript_unit(_qa_unit(4), narrative_settings, {})
+    assert (
+        question.text
+        == "Question (Ravi Menon, Alpha Capital): What drove the gross margin this quarter?"
     )
-    assert chunks[0].meta["firm"] == "Alpha Capital"
+    assert (question.speaker, question.speaker_role, question.page) == ("Ravi Menon", "analyst", 3)
+    assert question.meta["firm"] == "Alpha Capital"
+    # the reply is management's, under the name in its label, and does not contain the question
+    assert answer.text.startswith("Answer (Asha Rao, Chief Financial Officer): The answer sentence")
+    assert "Question (" not in answer.text
+    assert (answer.speaker, answer.speaker_role) == ("Asha Rao", "management")
+    assert answer.meta["role_title"] == "Chief Financial Officer"
+    assert "firm" not in answer.meta  # the firm is the analyst's, not the CFO's
+    assert answer.meta["question"].startswith("What drove the gross margin")
+    # the analyst's follow-up is the analyst's again
+    assert follow_up.text == "Follow-up (Ravi Menon): And next year?"
+    assert (follow_up.speaker, follow_up.speaker_role) == ("Ravi Menon", "analyst")
 
 
-def test_acceptance_13_a_long_answer_repeats_the_question_in_every_chunk(
+def test_acceptance_13_a_long_answer_is_split_and_every_piece_stays_management(
     narrative_settings,
 ) -> None:
     chunks = chunk_transcript_unit(_qa_unit(200), narrative_settings, {})
-    assert len(chunks) > 2
-    for chunk in chunks:
-        assert chunk.text.startswith("Question (Ravi Menon, Alpha Capital): What drove")
-        assert "Answer (" in chunk.text  # no chunk holds the question without an answer
-    assert any("(continued):" in c.text for c in chunks)
+    answers = [c for c in chunks if c.text.startswith("Answer (")]
+    assert len(answers) > 1
+    assert {(c.speaker, c.speaker_role) for c in answers} == {("Asha Rao", "management")}
+    assert any("(continued):" in c.text for c in answers)
     assert max(c.token_count for c in chunks) <= narrative_settings.chunk_tokens + 20
+    assert [c.speaker_role for c in chunks if c.text.startswith("Question (")] == ["analyst"]
+
+
+def test_an_unattributed_reply_has_no_speaker_and_no_role(narrative_settings) -> None:
+    unit = TranscriptUnit(
+        "qa",
+        "Ravi Menon",
+        "analyst",
+        "Alpha Capital",
+        3,
+        3,
+        "Any update?",
+        ("Answer (unattributed): Yes.",),
+    )
+    reply = chunk_transcript_unit(unit, narrative_settings, {})[1]
+    assert (reply.speaker, reply.speaker_role) == (None, None)
 
 
 def test_prepared_remarks_chunks_carry_the_speaker(narrative_settings) -> None:

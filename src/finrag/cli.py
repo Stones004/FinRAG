@@ -15,6 +15,7 @@ from finrag.metrics.cli import metrics_app
 from finrag.narrative.cli import narrative_app
 from finrag.normalize.cli import normalize_app, review_app
 from finrag.parsing.cli import parse_app
+from finrag.query.cli import ask_command, routing_app
 from finrag.validation.cli import validate_app
 from finrag.watchlist.cli import watchlist_app
 
@@ -30,6 +31,8 @@ app.add_typer(facts_app, name="facts")
 app.add_typer(validate_app, name="validate")
 app.add_typer(metrics_app, name="metrics")
 app.add_typer(narrative_app, name="narrative")
+app.add_typer(routing_app, name="routing")
+app.command("ask")(ask_command)
 
 
 def _load_settings() -> Settings:

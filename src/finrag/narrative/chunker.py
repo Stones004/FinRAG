@@ -205,48 +205,85 @@ def chunk_text_block(
 
 
 def _question_prefix(unit: TranscriptUnit) -> str:
-    """'Question (<name>, <firm>): <text>'."""
+    """'Question (<name>, <firm>):' for the analyst's turn."""
     who = f"{unit.speaker}, {unit.firm}" if unit.firm else str(unit.speaker)
-    return f"Question ({who}): {unit.text}"
+    return f"Question ({who}):"
+
+
+_TURN_LABEL = re.compile(r"^(Answer|Follow-up) \(([^)]*)\)(?: \(continued\))?:\s*")
+_ANALYST_ROLE = "analyst"
+_MANAGEMENT_ROLE = "management"
+
+
+def _answer_turn(block: str, unit: TranscriptUnit) -> tuple[str | None, str | None, str | None]:
+    """A Q&A answer block -> (speaker, role, role title) read from its label.
+
+    'Answer (<name>, <title>):' is management; 'Follow-up (<name>):' is the analyst again;
+    'Answer (unattributed):' has no speaker, so it is neither (searches limited to a role skip it).
+    """
+    match = _TURN_LABEL.match(block)
+    if match is None:
+        return None, None, None
+    kind, detail = match.group(1), match.group(2)
+    if kind == "Follow-up":
+        return detail or unit.speaker, _ANALYST_ROLE, None
+    if detail == "unattributed":
+        return None, None, None
+    name, _, title = detail.partition(", ")
+    return name, _MANAGEMENT_ROLE, title or None
 
 
 def chunk_transcript_unit(
     unit: TranscriptUnit, settings: NarrativeSettings, meta: dict[str, Any]
 ) -> list[DraftChunk]:
-    """A transcript unit -> chunks. A Q&A unit keeps its question in every chunk."""
+    """A transcript unit -> chunks.
+
+    A management turn of the prepared or closing remarks is chunked as before. A Q&A unit is cut
+    by turn: the analyst's question (role analyst), then each reply on its own (role management,
+    the speaker named in the label), so that a chunk's speaker role is true for all its text.
+    The question is kept in the metadata of its answers (`question`), not in their text.
+    """
     base = {**meta, "end_page": unit.end_page}
     if unit.firm:
         base["firm"] = unit.firm
 
-    def draft(text: str) -> DraftChunk:
+    no_firm = {k: v for k, v in base.items() if k != "firm"}  # the firm is the analyst's
+
+    def draft(
+        text: str, speaker, role, extra: dict[str, Any] | None = None, speaker_firm: bool = True
+    ) -> DraftChunk:
         return DraftChunk(
             section=unit.section,
             text=text,
             token_count=count_tokens(text),
             page=unit.start_page,
-            speaker=unit.speaker,
-            speaker_role=unit.speaker_role,
-            meta=base,
+            speaker=speaker,
+            speaker_role=role,
+            meta={**base, **(extra or {})} if speaker_firm else {**no_firm, **(extra or {})},
         )
 
     if unit.section != "qa":
-        return [draft(text) for text, _ in chunk_text(unit.text, unit.start_page, settings)]
+        return [
+            draft(text, unit.speaker, unit.speaker_role)
+            for text, _ in chunk_text(unit.text, unit.start_page, settings)
+        ]
     prefix = _question_prefix(unit)
-    prefix_tokens = count_tokens(prefix)
-    room = max(settings.chunk_tokens - prefix_tokens, settings.chunk_tokens // 2)
-    blocks = [part for block in unit.answers for part in _split_block(block, room, settings)]
-    chunks: list[str] = []
-    body: list[str] = []
-    used = 0
-    for block in blocks:
-        tokens = count_tokens(block)
-        if body and used + tokens > room:
-            chunks.append(" ".join([prefix, *body]))
-            body, used = [], 0
-        body.append(block)
-        used += tokens
-    chunks.append(" ".join([prefix, *body]) if body else prefix)
-    return [draft(text) for text in chunks]
+    room = max(settings.chunk_tokens - count_tokens(prefix), settings.chunk_tokens // 2)
+    chunks = [
+        draft(f"{prefix} {text}", unit.speaker, unit.speaker_role)
+        for text, _ in chunk_text(unit.text, unit.start_page, settings)
+    ] or [draft(prefix, unit.speaker, unit.speaker_role)]
+    question = unit.text[: settings.chunk_tokens]
+    for block in unit.answers:
+        speaker, role, title = _answer_turn(block, unit)
+        extra: dict[str, Any] = {"question": question, "turn": "answer"}
+        if title:
+            extra["role_title"] = title
+        if role == _ANALYST_ROLE:
+            extra["turn"] = "follow_up"
+        for piece in _split_block(block, room, settings):
+            chunks.append(draft(piece, speaker, role, extra, speaker_firm=role == _ANALYST_ROLE))
+    return chunks
 
 
 def _split_block(block: str, room: int, settings: NarrativeSettings) -> list[str]:

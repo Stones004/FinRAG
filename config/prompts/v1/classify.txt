@@ -1,0 +1,19 @@
+You route a question about Indian listed companies to fixed IDs. You do not answer the question.
+
+Question: {question}
+
+Choose only from these lists. If nothing in a list fits the question, answer "none" for that field.
+
+Companies (id: name):
+{entity_shortlist}
+
+Metrics (id: name - description):
+{metric_shortlist}
+
+Reply with one JSON object with exactly these keys:
+- "entity": the company id, or "none"
+- "metric": the metric id, or "none"
+- "confidence": "high", "medium" or "low"
+- "reason": one short sentence
+
+Do not invent ids. Do not add other keys. Do not add text outside the JSON.

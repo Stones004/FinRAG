@@ -339,6 +339,8 @@ class QueryRetrievalSettings(_Model):
     guidance_quarters: int = Field(gt=0)
     mmr_lambda: float = Field(ge=0, le=1)
     explore_min_dense_score: float = Field(ge=0, le=1)
+    related_min_dense_score: float = Field(ge=0, le=1)
+    related_sentences: int = Field(gt=0)
 
 
 class RoutingSettings(_Model):
@@ -408,6 +410,7 @@ class UiSettings(_Model):
 class LoggingSettings(_Model):
     json_logs: bool
     query_log_enabled: bool
+    query_log_raw_reply: bool = False
 
 
 class Settings(_Model):

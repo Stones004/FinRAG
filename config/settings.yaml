@@ -190,6 +190,8 @@ query:
     k_candidates: 15                   # narrative hits fetched before MMR picks max_chunks_in_prompt of them
     guidance_quarters: 2               # a guidance question searches the calls of this many latest quarters
     mmr_lambda: 0.7                    # 1 = pure relevance, 0 = pure diversity
+    related_min_dense_score: 0.60      # when no selected sentence survives, the top sentences are shown as related disclosures if the best hit has at least this cosine similarity
+    related_sentences: 2               # how many sentences are shown as related disclosures
     explore_min_dense_score: 0.62      # a no-metric, no-cue question is answered only if its best hit has at least this cosine similarity (bge-small on the 3 real companies: matching passages 0.62-0.76, unrelated questions 0.40-0.53), else the user is asked
   routing:
     cases: tests/m09_query/routing_cases.yaml   # the routing set (relative to the repo root)
@@ -209,7 +211,7 @@ llm:
   num_ctx: 8192
   timeout_s: 180
   retries: 2
-  prompt_version: v2
+  prompt_version: v3
 
 scheduler:
   results_season_months: [1, 2, 4, 5, 7, 8, 10, 11]
@@ -234,3 +236,4 @@ ui:
 logging:
   json_logs: true
   query_log_enabled: true
+  query_log_raw_reply: true            # store the model's raw reply in query_log.postcheck_json, so a failed answer can be debugged

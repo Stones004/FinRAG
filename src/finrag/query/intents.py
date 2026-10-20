@@ -49,6 +49,7 @@ class Intents(_Model):
     causal_words: list[str]
     hedge_words: list[str]
     explore_stopwords: list[str]
+    sentence_abbreviations: list[str]
     speaker_terms: dict[str, list[str]]
     growth_words: list[str]
     growth_counterparts: dict[str, str]

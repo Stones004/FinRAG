@@ -201,7 +201,13 @@ def test_replay_hdfc_management_say_searches_management_turns_only(real, monkeyp
     assert "role analyst" not in prompt and "role management" in prompt
     roles = {c.detail["speaker_role"] for c in answer.citations if c.kind == "chunk"}
     assert roles <= {"management", None}
-    assert answer.explanation == NO_EXPLANATION and len(answer.dropped) == 4
+    # none of the four logged sentences survives; the retrieval was strong, so the two closest
+    # sentences of management's turns are shown as related disclosures, under their speaker
+    assert len(answer.dropped) == 4 and "stated that" not in answer.explanation
+    assert (
+        answer.text.count("  > “") == 2 and "- Management (Srinivasan Vaidyanathan)" in answer.text
+    )
+    assert "The filings do not explain this" not in answer.text
     assert "an analyst" not in prompt.split("Rules:")[0]  # no analyst passage was offered
 
 
@@ -247,4 +253,5 @@ def test_netweb_capex_plan_fy28_searches_the_latest_calls_and_labels_the_numbers
     quarters = set(re.findall(r"period (Q\d FY\d\d)", prompt))
     assert quarters and quarters <= {"Q4 FY26", "Q1 FY27"}  # the latest calls, not FY28's quarters
     assert "role analyst" not in prompt  # guidance is management's, not an analyst's question
-    assert answer.explanation == "Management guidance is not in the indexed filings."
+    assert "Management guidance is not in the indexed filings." not in answer.text
+    assert answer.text.count("  > “") == 2  # related disclosures, from management turns only

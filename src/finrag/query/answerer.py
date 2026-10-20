@@ -16,6 +16,8 @@ from finrag.query.models import Evidence, Intent, Plan
 from finrag.query.numbers_block import NumbersBlock
 from finrag.query.period_resolver import describe_period
 from finrag.query.postcheck import NO_CHUNKS, NO_GUIDANCE
+from finrag.query.selection import SELECTION_SCHEMA, Selection, parse_selections
+from finrag.query.sentences import number_sentences
 
 log = get_logger("query.answerer")
 
@@ -27,6 +29,8 @@ NO_CHUNKS_FOUND = "no_chunks"
 LLM_DOWN = "llm_unavailable"
 LLM_DRAFT = "llm"
 LLM_UNREADABLE = "llm_unreadable"
+# a prompt that asks for sentence ids contains this word; the earlier prompts ask for claims
+SELECTING = '"selections"'
 
 NO_CHUNKS_NOTE = "No passage from the indexed filings was usable for this question."
 NO_TRANSCRIPT_NOTE = (
@@ -49,7 +53,8 @@ class Draft:
 
     status: str
     text: str | None = None
-    claims: list[Claim] = field(default_factory=list)
+    claims: list[Claim] = field(default_factory=list)  # claims of the earlier prompt shape (v2)
+    selections: list[Selection] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     response: LLMResponse | None = None
     prompt: str | None = None
@@ -92,21 +97,25 @@ class Answerer:
             )
         if evidence.transcripts_missing:
             notes.append(NO_TRANSCRIPT_NOTE)
+        template = load_prompt("guidance" if intent.forward_looking else "explain")
+        selecting = SELECTING in template
         prompt = render(
-            load_prompt("guidance" if intent.forward_looking else "explain"),
+            template,
             {
                 "question": intent.question,
                 "period": ", ".join(describe_period(p) for p in intent.periods),
                 "basis": intent.basis or "consolidated and standalone",
                 "numbers_block": block.text or NO_FIGURES,
-                "chunks": self._chunks(evidence),
+                "chunks": self._numbered(evidence) if selecting else self._chunks(evidence),
             },
         )
         if self.llm is None:
             notes.append("The language model is not available, so only the figures are shown.")
             return Draft(LLM_DOWN, None, notes=notes, prompt=prompt)
         try:
-            response = self.llm.generate(SYSTEM, prompt, CLAIMS_SCHEMA)
+            response = self.llm.generate(
+                SYSTEM, prompt, SELECTION_SCHEMA if selecting else CLAIMS_SCHEMA
+            )
         except LLMInvalidOutput as exc:
             log.warning("llm output unreadable", extra={"fields": {"error": str(exc)}})
             notes.append(LLM_UNREADABLE_NOTE)
@@ -115,7 +124,22 @@ class Answerer:
             log.warning("llm unavailable", extra={"fields": {"error": str(exc)}})
             notes.append("The language model is not available, so only the figures are shown.")
             return Draft(LLM_DOWN, None, notes=notes, prompt=prompt)
-        return Draft(LLM_DRAFT, response.text, parse_claims(response.data), notes, response, prompt)
+        if selecting:
+            picks = parse_selections(response.data)
+            return Draft(LLM_DRAFT, response.text, [], picks, notes, response, prompt)
+        claims = parse_claims(response.data)
+        return Draft(LLM_DRAFT, response.text, claims, [], notes, response, prompt)
+
+    def _numbered(self, evidence: Evidence) -> str:
+        """Chunks -> '[N1] (what it is, its period, who speaks)' and its numbered sentences."""
+        by_id = {h.chunk_id: h for h in evidence.chunks}
+        sentences = number_sentences(evidence, frozenset(self.intents.sentence_abbreviations))
+        blocks = []
+        for alias, cid in evidence.chunk_aliases.items():
+            lines = [f"[{alias}] ({passage_label(by_id[cid])})"]
+            lines += [f"{s.id} {s.text}" for s in sentences.values() if s.alias == alias]
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
 
     @staticmethod
     def _chunks(evidence: Evidence) -> str:

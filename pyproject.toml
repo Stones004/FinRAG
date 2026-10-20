@@ -36,6 +36,7 @@ testpaths = ["tests"]
 addopts = "--import-mode=importlib --strict-markers"
 markers = [
     "golden: uses real filings under tests/golden (skipped when empty)",
+    "selection: runs on the v3 prompts (sentence selection); the other M09 tests run on the v2 claim prompts",
     "slow: loads the real embedding model from the local cache (skipped if not cached)",
 ]
 

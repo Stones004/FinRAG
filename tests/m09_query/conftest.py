@@ -19,11 +19,23 @@ def registries(isolated_repo: Path) -> None:
     shutil.copytree(REAL / "config" / "vocab", isolated_repo / "config" / "vocab")
 
 
+@pytest.fixture(autouse=True)
+def _claim_prompts(isolated_repo: Path, request: pytest.FixtureRequest) -> None:
+    """Tests of the claim shape (prompt v2) run on v2; tests marked `selection` run on v3."""
+    if request.node.get_closest_marker("selection") is None:
+        path = isolated_repo / "config" / "settings.yaml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("prompt_version: v3", "prompt_version: v2"),
+            encoding="utf-8",
+        )
+        reset_settings_cache()
+
+
 # --- shared helpers ------------------------------------------------------------------------
 
 import sqlalchemy as sa  # noqa: E402
 
-from finrag.core.config import get_settings  # noqa: E402
+from finrag.core.config import get_settings, reset_settings_cache  # noqa: E402
 from finrag.core.db import init_db, tables, transaction  # noqa: E402
 from finrag.core.fiscal import label_to_period  # noqa: E402
 from finrag.core.types import utc_now_iso  # noqa: E402

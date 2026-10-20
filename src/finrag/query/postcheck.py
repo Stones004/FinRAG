@@ -14,6 +14,14 @@ from finrag.narrative.search import SearchHit
 from finrag.query.claims import Claim, ClaimRules, check_claim
 from finrag.query.models import Citation, Evidence
 from finrag.query.numbers_block import NumbersBlock
+from finrag.query.selection import (
+    LeadInContext,
+    Picked,
+    Selection,
+    lead_in_problem,
+    sentence_problem,
+)
+from finrag.query.sentences import Sentence
 
 NO_EXPLANATION = "The filings do not explain this."
 NO_CHUNKS = NO_EXPLANATION  # nothing usable was retrieved: the same sentence, with a note saying so
@@ -26,13 +34,24 @@ _CITE_GROUP = re.compile(r"\[([^\]]*)\]")
 class PostcheckResult:
     """Claims kept and dropped (with reasons), and the aliases the kept ones cite."""
 
-    kept: list[Claim] = field(default_factory=list)
+    kept: list[Claim] = field(default_factory=list)  # claims of the earlier prompt shape (v2)
+    picked: list[Picked] = field(default_factory=list)  # selected sentences that passed
     dropped: list[dict[str, str]] = field(default_factory=list)
+    lead_ins_dropped: list[dict[str, str]] = field(default_factory=list)
     cited: list[str] = field(default_factory=list)
+
+    @property
+    def survived(self) -> bool:
+        """True if anything the model chose reached the answer."""
+        return bool(self.kept or self.picked)
 
     @property
     def explanation(self) -> str:
         """The surviving claims as sentences, each with its citations."""
+        if self.picked:
+            return " ".join(
+                f"{p.lead_in or p.sentence.text} [{p.sentence.alias}]" for p in self.picked
+            )
         return " ".join(c.sentence for c in self.kept)
 
 
@@ -70,6 +89,37 @@ def postcheck(
             continue
         result.kept.append(claim)
         result.cited += [a for a in claim.cites if a not in result.cited]
+    return result
+
+
+def postcheck_selections(
+    picks: list[Selection],
+    sentences: dict[str, Sentence],
+    block: NumbersBlock,
+    rules: ClaimRules,
+    context: LeadInContext,
+) -> PostcheckResult:
+    """The model's picks -> the sentences that pass, each with the lead-in that passed."""
+    result = PostcheckResult()
+    seen: set[str] = set()
+    for pick in picks:
+        reason = sentence_problem(pick, sentences, seen, rules)
+        if reason is not None:
+            result.dropped.append({"sentence": pick.id, "reason": reason})
+            continue
+        seen.add(pick.id)
+        sentence = sentences[pick.id]
+        lead_in = pick.lead_in
+        if lead_in:
+            problem = lead_in_problem(lead_in, sentence, rules, context)
+            if problem is not None:
+                result.lead_ins_dropped.append(
+                    {"sentence": pick.id, "lead_in": lead_in, "reason": problem}
+                )
+                lead_in = ""
+        result.picked.append(Picked(sentence, lead_in))
+        if sentence.alias not in result.cited:
+            result.cited.append(sentence.alias)
     return result
 
 

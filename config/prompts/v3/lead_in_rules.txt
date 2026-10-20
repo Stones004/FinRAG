@@ -1,0 +1,5 @@
+Rules for a lead-in:
+- It must not contain a number, a period (such as Q1 FY27 or FY26) or a company or person name unless the sentence itself or a figure above contains it. Do not add, subtract, compare or round numbers.
+- It may say that something is a cause ("due to", "because") only if the sentence says so.
+- It may say "management" only for a passage whose role is management, and "an analyst" for an analyst's words.
+- If the sentence says "maybe", "around", "expect", "could", "likely" or the like, a lead-in that says anything about it must hedge too.

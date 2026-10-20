@@ -331,6 +331,7 @@ class AnswerSettings(_Model):
     max_chunks_in_prompt: int = Field(gt=0)
     require_citation_per_sentence: bool
     numeric_check_enabled: bool
+    show_lead_ins: bool = False
     min_quote_chars: int = Field(gt=0)
 
 

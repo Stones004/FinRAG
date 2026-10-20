@@ -183,7 +183,39 @@ def find_columns(
             clusters[-1].append(edge)
         else:
             clusters.append([edge])
-    return [Column(statistics.median(c), len(c)) for c in clusters if len(c) >= min_rows]
+    clusters = [part for cluster in clusters for part in _split_wide(cluster, tolerance, min_rows)]
+    best = max((len(c) for c in clusters), default=0)
+    floor = max(min_rows, min_ratio * best)
+    return [Column(statistics.median(c), len(c)) for c in clusters if len(c) >= floor]
+
+
+def _split_wide(cluster: list[float], tolerance: float, min_rows: int) -> list[list[float]]:
+    """A chain of edges wider than two tolerances is several columns whose stray edges touch.
+
+    Narrow columns (a quarter and a year column 36 pt apart) are joined into one chain by the
+    numbers between them. Cut the chain at its density peaks: the densest edge position (within
+    half a tolerance) that has at least `min_rows` edges and lies more than a tolerance from a
+    peak already taken is a column; every edge goes to the nearest peak within a tolerance and
+    the rest are dropped as stray.
+    """
+    if cluster[-1] - cluster[0] <= 2 * tolerance:
+        return [cluster]
+
+    def density(centre: float) -> int:
+        return sum(1 for e in cluster if abs(e - centre) <= tolerance / 2)
+
+    peaks: list[float] = []
+    for centre in sorted(set(cluster), key=lambda e: (-density(e), e)):
+        if density(centre) >= min_rows and all(abs(centre - p) > tolerance for p in peaks):
+            peaks.append(centre)
+    if len(peaks) < 2:
+        return [cluster]
+    parts: list[list[float]] = [[] for _ in peaks]
+    for edge in cluster:
+        nearest = min(range(len(peaks)), key=lambda i: abs(edge - peaks[i]))
+        if abs(edge - peaks[nearest]) <= tolerance:
+            parts[nearest].append(edge)
+    return sorted((part for part in parts if part), key=lambda part: part[0])
 
 
 def _column_of(word: Word, columns: Sequence[Column], tolerance: float) -> int | None:
@@ -279,9 +311,26 @@ def build_table(
     # the numeric zone starts at the leftmost placed number (labels never reach into it)
     left_edge = min(left for _, _, _, left in placed if left is not None) - params.column_tolerance
     needed = max(1, -(-len(columns) // 2))  # the first data row fills at least half the columns
-    first = next((i for i, (_, _, cells, _) in enumerate(placed) if len(cells) >= needed), None)
-    if first is None:
+    candidates = [i for i, (_, _, cells, _) in enumerate(placed) if len(cells) >= needed]
+    if not candidates:
         return None
+    # a line that carries a date is a header line even when a year in it looks like a number
+    candidates = [
+        i for i in candidates if not date_spans(placed[i][0].text, patterns)
+    ] or candidates
+    # the table starts below the lines that carry its period dates; a stray number above them
+    # (a postcode in the address block) is not a data row
+    first = next(
+        (
+            i
+            for i in candidates
+            if any(
+                date_spans(ln.text, patterns)
+                for ln, _, _, _ in placed[max(0, i - params.header_max_lines) : i]
+            )
+        ),
+        candidates[0],
+    )
     table = Table(
         columns, [], [ln for ln, _, _, _ in placed[max(0, first - params.header_max_lines) : first]]
     )

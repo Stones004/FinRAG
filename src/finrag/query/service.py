@@ -264,7 +264,14 @@ class QueryService:
                 vocab=load_vocab()
                 | frozenset(w.casefold() for w in self.answerer.intents.explore_stopwords),
             )
-            return postcheck_selections(draft.selections, sentences, block, rules, context)
+            return postcheck_selections(
+                draft.selections,
+                sentences,
+                block,
+                rules,
+                context,
+                self.settings.query.answer.show_lead_ins,
+            )
         return postcheck(
             draft.claims, evidence, block, self.settings.query.answer, self._rules(intent, plan)
         )

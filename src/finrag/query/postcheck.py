@@ -98,8 +98,12 @@ def postcheck_selections(
     block: NumbersBlock,
     rules: ClaimRules,
     context: LeadInContext,
+    lead_ins: bool = True,
 ) -> PostcheckResult:
-    """The model's picks -> the sentences that pass, each with the lead-in that passed."""
+    """The model's picks -> the sentences that pass, each with the lead-in that passed.
+
+    With `lead_ins` off a lead-in the model wrote anyway is ignored (not checked, not shown).
+    """
     result = PostcheckResult()
     seen: set[str] = set()
     for pick in picks:
@@ -109,7 +113,7 @@ def postcheck_selections(
             continue
         seen.add(pick.id)
         sentence = sentences[pick.id]
-        lead_in = pick.lead_in
+        lead_in = pick.lead_in if lead_ins else ""
         if lead_in:
             problem = lead_in_problem(lead_in, sentence, rules, context)
             if problem is not None:

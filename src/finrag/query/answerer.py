@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from finrag.core.config import get_settings
 from finrag.core.logging import get_logger
 from finrag.core.types import Period, PeriodType
 from finrag.llm.base import LLMClient, LLMInvalidOutput, LLMResponse, LLMUnavailable
@@ -16,7 +17,7 @@ from finrag.query.models import Evidence, Intent, Plan
 from finrag.query.numbers_block import NumbersBlock
 from finrag.query.period_resolver import describe_period
 from finrag.query.postcheck import NO_CHUNKS, NO_GUIDANCE
-from finrag.query.selection import SELECTION_SCHEMA, Selection, parse_selections
+from finrag.query.selection import Selection, parse_selections, selection_schema
 from finrag.query.sentences import number_sentences
 
 log = get_logger("query.answerer")
@@ -99,6 +100,7 @@ class Answerer:
             notes.append(NO_TRANSCRIPT_NOTE)
         template = load_prompt("guidance" if intent.forward_looking else "explain")
         selecting = SELECTING in template
+        lead_ins = get_settings().query.answer.show_lead_ins
         prompt = render(
             template,
             {
@@ -107,6 +109,8 @@ class Answerer:
                 "basis": intent.basis or "consolidated and standalone",
                 "numbers_block": block.text or NO_FIGURES,
                 "chunks": self._numbered(evidence) if selecting else self._chunks(evidence),
+                "lead_in_field": load_prompt("lead_in_field") if selecting and lead_ins else "",
+                "lead_in_rules": load_prompt("lead_in_rules") if selecting and lead_ins else "",
             },
         )
         if self.llm is None:
@@ -114,7 +118,7 @@ class Answerer:
             return Draft(LLM_DOWN, None, notes=notes, prompt=prompt)
         try:
             response = self.llm.generate(
-                SYSTEM, prompt, SELECTION_SCHEMA if selecting else CLAIMS_SCHEMA
+                SYSTEM, prompt, selection_schema(lead_ins) if selecting else CLAIMS_SCHEMA
             )
         except LLMInvalidOutput as exc:
             log.warning("llm output unreadable", extra={"fields": {"error": str(exc)}})

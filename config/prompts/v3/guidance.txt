@@ -14,11 +14,9 @@ Passages from the company's filings. Each passage has an id and says what it is,
 
 Reply with one JSON object: {"selections": [ ... ]}. Each selection has:
   "id":      the number of one sentence, for example "N2.3".
-  "lead_in": optional, a few words that say what the sentence is about. Leave it out if the sentence speaks for itself.
-
+{lead_in_field}
 Rules:
-1. Choose 0 to 4 sentences in which management speaks about plans, outlook, targets or expectations that answer the question. Use only the numbered sentences above.
-2. A lead-in must not contain a number, a period (such as Q1 FY27 or FY26) or a company or person name unless the sentence itself contains it. Never present an actual figure as guidance.
-3. A lead-in may say "management" only for a passage whose role is management. An analyst's question is not guidance.
-4. Keep the speaker's hedges: if the sentence says "maybe", "around", "expect", "could", "likely" or the like, a lead-in that says anything about it must hedge too.
-5. If no sentence states plans, outlook or expectations that answer the question, reply {"selections": []}.
+1. Choose 0 to 4 sentences in which management speaks about plans, outlook, targets or expectations that answer the question. Use only the numbered sentences above. List the best sentence first.
+2. An analyst's question is not guidance. Never choose a sentence that only reports an actual figure.
+3. If no sentence states plans, outlook or expectations that answer the question, reply {"selections": []}.
+{lead_in_rules}

@@ -29,22 +29,29 @@ from finrag.query.formatter import numbers_in
 from finrag.query.period_refs import period_refs
 from finrag.query.sentences import Sentence
 
-SELECTION_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "required": ["selections"],
-    "additionalProperties": False,
-    "properties": {
-        "selections": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["id"],
-                "additionalProperties": False,
-                "properties": {"id": {"type": "string"}, "lead_in": {"type": "string"}},
-            },
-        }
-    },
-}
+
+def selection_schema(lead_ins: bool) -> dict[str, Any]:
+    """The reply schema: sentence ids in order of usefulness, with a lead-in only if allowed."""
+    properties: dict[str, Any] = {"id": {"type": "string"}}
+    if lead_ins:
+        properties["lead_in"] = {"type": "string"}
+    return {
+        "type": "object",
+        "required": ["selections"],
+        "additionalProperties": False,
+        "properties": {
+            "selections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["id"],
+                    "additionalProperties": False,
+                    "properties": properties,
+                },
+            }
+        },
+    }
+
 
 DROP_UNKNOWN_SENTENCE = "unknown_sentence"
 DROP_DUPLICATE = "duplicate_sentence"
@@ -184,7 +191,10 @@ def attribution(sentence: Sentence, management_roles: frozenset[str]) -> str:
     """Who said a sentence, from the stored speaker (never from the model)."""
     hit = sentence.hit
     if hit.source_type != "transcript":
-        return "Results filing, " + (hit.section or "text").replace("_", " ")
+        parts = ["Results filing", (hit.section or "text").replace("_", " ")]
+        parts += [hit.period_label] if hit.period_label else []
+        parts += [f"p. {hit.page}"] if hit.page is not None else []
+        return ", ".join(parts)
     role = (hit.speaker_role or "").casefold()
     who = hit.speaker or "speaker not identified"
     if role in management_roles:

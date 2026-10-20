@@ -50,6 +50,24 @@ def results_hit(text=SCHEME, label="Q1 FY27", dense=0.7, cid="CHK-R1"):
     return strong(hit(text, cid, source="results", section="results_notes", label=label), dense)
 
 
+def set_lead_ins(isolated_repo, value: bool) -> None:
+    path = isolated_repo / "config" / "settings.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "show_lead_ins: false", f"show_lead_ins: {str(value).lower()}"
+        ),
+        encoding="utf-8",
+    )
+    reset_settings_cache()
+
+
+@pytest.fixture(autouse=True)
+def lead_ins(isolated_repo, request) -> None:
+    """Lead-ins are off by default; the tests of their checks turn them on."""
+    if not request.node.name.startswith("test_default"):
+        set_lead_ins(isolated_repo, True)
+
+
 @pytest.fixture
 def pat(kit, monkeypatch):
     kit.fact(GABRIEL, "profit_after_tax", "Q1 FY27", D("1081260000"))
@@ -91,6 +109,20 @@ def test_the_prompt_numbers_the_sentences_and_the_reader_sees_the_stored_one(pat
     assert "On the accounting for the scheme [N1]" in answer.text
     assert f"  > “{S1}”" in answer.text  # the stored sentence, byte for byte
     assert answer.explanation and "The filings do not explain this" not in answer.text
+
+
+def test_default_output_is_the_source_label_and_the_stored_sentence_in_the_models_order(
+    pat,
+) -> None:
+    chunks_from(pat, {"transcript": [], "results": [results_hit()]})
+    llm = FakeLLM(default=reply(("N1.4", ""), ("N1.1", "")))
+    answer = ask(llm)
+    label = "- Results filing, results notes, Q1 FY27, p. 5 [N1]:"
+    shown = answer.text.split("**What the filings say**")[1].split("**Sources**")[0]
+    assert shown.strip().splitlines() == [label, f"  > “{S4}”", label, f"  > “{S1}”"]
+    assert "lead-in" not in answer.text
+    system, prompt, schema = llm.calls[0]
+    assert "lead_in" not in prompt and "lead_in" not in json.dumps(schema)
 
 
 # --- lead-ins ----------------------------------------------------------------------------------

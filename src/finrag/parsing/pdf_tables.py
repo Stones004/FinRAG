@@ -11,7 +11,8 @@ from datetime import date
 from decimal import Decimal
 
 from finrag.core.config import ConfigError, PdfSettings, Settings, get_settings
-from finrag.core.types import Basis, PeriodType
+from finrag.core.fiscal import period_to_label
+from finrag.core.types import Basis, Period, PeriodType
 from finrag.parsing.models import EXTRACTOR_OCR, EXTRACTOR_TABLE, ParsedFact
 from finrag.parsing.numbers import NotANumber, parse_number
 from finrag.parsing.page_classifier import PageLabel
@@ -60,6 +61,21 @@ def period_start(end: date, kind: PeriodType, patterns: SectionPatterns) -> date
     months = patterns.months_in_kind[kind]
     index = end.year * 12 + (end.month - 1) - (months - 1)
     return date(index // 12, index % 12 + 1, 1)
+
+
+def kind_fits(end: date, kind: PeriodType, patterns: SectionPatterns) -> bool:
+    """True if a period of this type ending on `end` is a real fiscal period.
+
+    A column's length must match its header type: "Year ended 30.06.2025" would be twelve months
+    from July, which is no fiscal year of a March year-end, so that column is a quarter.
+    """
+    if kind is PeriodType.INSTANT:
+        return True
+    try:
+        period_to_label(Period(period_start(end, kind, patterns), end, kind))
+    except (ValueError, KeyError):
+        return False
+    return True
 
 
 def _kind_labels(
@@ -144,11 +160,55 @@ def read_headers(
         ) or find_date(" ".join(line.text for line in per_column[index]), patterns)
         kind = None
         if kinds:
-            kind = min(kinds, key=lambda item: abs(item[0] - centres[index]))[1]
+            # a "Quarter ended" label sits over one of its columns, not over each: the nearest label
+            # that makes a real fiscal period of this column's date wins
+            ranked = sorted(kinds, key=lambda item: abs(item[0] - centres[index]))
+            kind = ranked[0][1]
+            if end is not None:
+                kind = next((k for _, k in ranked if kind_fits(end, k, patterns)), kind)
         if statement_type == BALANCE_SHEET:
             kind = PeriodType.INSTANT
         periods.append(ColumnPeriod(end, kind, " ".join(line.text for line in per_column[index])))
-    return periods
+    return _distinct(periods, kinds, centres, patterns)
+
+
+def _distinct(
+    periods: list[ColumnPeriod],
+    kinds: list[tuple[float, PeriodType]],
+    centres: list[float],
+    patterns: SectionPatterns,
+) -> list[ColumnPeriod]:
+    """No two columns of a table are the same period.
+
+    A date such as 31.03.2025 fits a quarter and a year; when two columns end up with the same
+    end date and type, the one whose header label is farther away takes the next fitting type
+    (the third column of "Quarter ended: 31.03.26, 31.12.25, 31.03.25 | Year ended: 31.03.26,
+    31.03.25" is the quarter, not a second 2025 year).
+    """
+    out = list(periods)
+    seen: dict[tuple[date, PeriodType], int] = {}
+
+    def distance(index: int, kind: PeriodType) -> float:
+        return min((abs(x - centres[index]) for x, k in kinds if k is kind), default=0.0)
+
+    for index, period in enumerate(out):
+        if period.end is None or period.kind is None:
+            continue
+        key = (period.end, period.kind)
+        other = seen.get(key)
+        if other is None:
+            seen[key] = index
+            continue
+        loser = max((index, other), key=lambda i: distance(i, period.kind))
+        alternatives = sorted(
+            {k for _, k in kinds if k is not period.kind and kind_fits(period.end, k, patterns)},
+            key=lambda k: distance(loser, k),
+        )
+        if alternatives:
+            out[loser] = ColumnPeriod(out[loser].end, alternatives[0], out[loser].text)
+            seen[key] = index if loser == other else other
+            seen.setdefault((period.end, alternatives[0]), loser)
+    return out
 
 
 def _confidence(table: Table, periods: Sequence[ColumnPeriod]) -> dict[str, float]:
@@ -293,8 +353,43 @@ def sum_shifted(
     return found
 
 
+_GHOST_OVERLAP = 0.5  # share of a space's width that another glyph must cover
+
+
+def ghost_spaces(chars: Sequence[dict]) -> set[tuple[float, float, str]]:
+    """Space glyphs that sit on top of another glyph of the same line (keys of the chars).
+
+    Some producers pad a right-aligned number with space glyphs that overlap its first digits;
+    sorted by position such a space lands between two digits and cuts "10,716.81" into "1" and
+    "0,716.81". A real word gap never overlaps a glyph.
+    """
+    lines: dict[int, list[dict]] = {}
+    for char in chars:
+        lines.setdefault(round(char["top"]), []).append(char)
+    ghosts: set[tuple[float, float, str]] = set()
+    for line in lines.values():
+        glyphs = [c for c in line if not c["text"].isspace()]
+        for space in (c for c in line if c["text"].isspace()):
+            width = space["x1"] - space["x0"]
+            if width > 0 and any(
+                min(g["x1"], space["x1"]) - max(g["x0"], space["x0"]) > _GHOST_OVERLAP * width
+                for g in glyphs
+            ):
+                ghosts.add(_char_key(space))
+    return ghosts
+
+
+def _char_key(char: dict) -> tuple[float, float, str]:
+    return (round(char["x0"], 2), round(char["top"], 2), char["text"])
+
+
 def _native_words(pdf_page: object) -> list[Word]:
-    """A pdfplumber page -> positioned words."""
+    """A pdfplumber page -> positioned words (ghost spaces left out)."""
+    ghosts = ghost_spaces(pdf_page.chars)  # type: ignore[attr-defined]
+    if ghosts:
+        pdf_page = pdf_page.filter(  # type: ignore[attr-defined]
+            lambda o: o.get("object_type") != "char" or _char_key(o) not in ghosts
+        )
     return [
         Word(w["text"], w["x0"], w["x1"], w["top"], w["bottom"])
         for w in pdf_page.extract_words()  # type: ignore[attr-defined]

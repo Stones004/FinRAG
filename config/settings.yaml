@@ -201,6 +201,7 @@ query:
     max_chunks_in_prompt: 5
     require_citation_per_sentence: true
     numeric_check_enabled: true
+    show_lead_ins: false               # false: the answer shows the source label and the stored sentence only; true: the model may add a short, checked lead-in
     min_quote_chars: 20                # a claim's quote must be at least this long (a word cannot prove a claim)
 
 llm:

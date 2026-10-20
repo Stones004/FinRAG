@@ -14,13 +14,10 @@ Passages from the company's filings. Each passage has an id and says what it is,
 
 Reply with one JSON object: {"selections": [ ... ]}. Each selection has:
   "id":      the number of one sentence, for example "N2.3".
-  "lead_in": optional, a few words that say why the sentence matters, for example "On the accounting for the scheme". Leave it out if the sentence speaks for itself.
-
+{lead_in_field}
 Rules:
-1. Choose 0 to 4 sentences that answer the question or explain the figures. Use only the numbered sentences above.
+1. Choose 0 to 4 sentences that answer the question or explain the figures. Use only the numbered sentences above. List the best sentence first.
 2. Choose only sentences about the period asked. Do not choose a sentence about another period, such as an earlier year, an earlier quarter or a comparative column.
-3. A lead-in must not contain a number, a period (such as Q1 FY27 or FY26) or a company or person name unless the sentence itself or a figure above contains it. Do not add, subtract, compare or round numbers.
-4. A lead-in may say that something is a cause ("due to", "because") only if the sentence says so. If the sentence only states a fact, the lead-in states no cause.
-5. Each passage shows who is speaking. A lead-in may say "management" only for a passage whose role is management, and "an analyst" for an analyst's words. Never say management reported or said a figure from the Figures list.
-6. Keep the speaker's hedges. If the sentence says "maybe", "around", "expect", "could", "likely" or the like, a lead-in that says anything about it must hedge too.
-7. If no sentence answers the question, reply {"selections": []}.
+3. Each passage shows who is speaking. An analyst's question is not an answer; choose it only if the question itself is what was asked about.
+4. If no sentence answers the question, reply {"selections": []}.
+{lead_in_rules}

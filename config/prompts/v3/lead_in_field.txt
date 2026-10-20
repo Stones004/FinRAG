@@ -1,0 +1,1 @@
+  "lead_in": optional, a few words that say why the sentence matters, for example "On the accounting for the scheme". Leave it out if the sentence speaks for itself.

@@ -42,12 +42,18 @@ class NumbersBlockBuilder:
     """Builds the block for one answer."""
 
     def __init__(
-        self, fmt: Formatter, registry: MetricRegistry, taxonomy: Taxonomy, unit: str
+        self,
+        fmt: Formatter,
+        registry: MetricRegistry,
+        taxonomy: Taxonomy,
+        unit: str,
+        event_covered_rules: tuple[str, ...] = (),
     ) -> None:
         self.fmt = fmt
         self.registry = registry
         self.taxonomy = taxonomy
         self.unit = unit
+        self.event_covered_rules = frozenset(event_covered_rules)
         self._actual = False  # set per answer: a guidance question shows actuals, labelled
         self._fact_alias: dict[str, str] = {}  # set per answer: fact id -> alias
 
@@ -305,8 +311,7 @@ class NumbersBlockBuilder:
             f"now {new.text} ({row['new_filing']}, {kind} filed {row['new_filed_on']}){flag}."
         )
 
-    @staticmethod
-    def _metric_notes(mv: Any, requested: str) -> list[str]:
+    def _metric_notes(self, mv: Any, requested: str) -> list[str]:
         """Basis fallback, assumed zeros, owners' profit fallbacks, validation warnings."""
         lines: list[str] = []
         used = mv.basis_used
@@ -320,7 +325,17 @@ class NumbersBlockBuilder:
             )
         for item in mv.details.get("fallbacks", []):
             lines.append(f"    Used {item['used']} instead of {item['wanted']}: {item['why']}.")
-        warnings = mv.warnings
+        # a PDF/XBRL disagreement for a period before a recorded event the metric straddles is that
+        # event, already said above: the warning would repeat it
+        covered = [e["event_date"] for e in mv.basis_change]
+        warnings = [
+            w
+            for w in mv.warnings
+            if not (
+                w["rule_id"] in self.event_covered_rules
+                and any(w.get("period_end", "") < day for day in covered)
+            )
+        ]
         if warnings:
             grouped: dict[tuple[str, str], list[str]] = {}
             for w in warnings:

@@ -10,6 +10,7 @@ from finrag.narrative.search import SearchRequest
 from finrag.normalize.taxonomy import Taxonomy
 from finrag.query.intents import Intents
 from finrag.query.models import Intent, MetricRequest, Plan
+from finrag.query.text import normalize, phrase_pattern
 
 TRANSCRIPT = "transcript"
 RESULTS = "results"
@@ -108,6 +109,31 @@ class Planner:
                         plan.requests.append(
                             MetricRequest(companion, period, bases[0], "companion")
                         )
+        self._growth_companions(intent, plan, bases[0])
+
+    def _growth_sibling(self, metric: str) -> str | None:
+        """The year-on-year growth metric of a metric or concept (None = it has none)."""
+        if metric in self.registry:
+            return self.registry.get(metric).growth_companion
+        return self.intents.growth_counterparts.get(metric)
+
+    def _uses_change_word(self, intent: Intent) -> bool:
+        text = normalize(intent.question, self.intents)
+        return any(phrase_pattern(w.casefold()).search(text) for w in self.intents.change_words)
+
+    def _growth_companions(self, intent: Intent, plan: Plan, basis: str) -> None:
+        """A change word in the question adds each asked metric's growth sibling as context."""
+        if not intent.metrics or not self._uses_change_word(intent):
+            return
+        asked = {r.metric for r in plan.requests}
+        for metric in intent.metrics:
+            sibling = self._growth_sibling(metric)
+            if sibling is None or sibling in asked:
+                continue
+            asked.add(sibling)
+            for period in intent.periods:
+                if period.type in self.registry.get(sibling).period_types:
+                    plan.requests.append(MetricRequest(sibling, period, basis, "companion"))
 
     # -- narrative ---------------------------------------------------------------------------
 

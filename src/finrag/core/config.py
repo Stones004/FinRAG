@@ -333,6 +333,8 @@ class AnswerSettings(_Model):
     numeric_check_enabled: bool
     show_lead_ins: bool = False
     min_quote_chars: int = Field(gt=0)
+    # validation rules whose warning is not repeated when a recorded event explains it
+    event_covered_rules: list[str] = []
 
 
 class QueryRetrievalSettings(_Model):
@@ -406,6 +408,11 @@ class UiSettings(_Model):
     show_blocked_metrics: bool
     show_interpretation: bool
     default_years_shown: int = Field(gt=0)
+    page_title: str
+    server_address: str
+    port: int = Field(gt=0, lt=65536)
+    embedder_warmup_text: str  # embedded once so the first question finds the weights loaded
+    feedback_note_max_chars: int = Field(gt=0)
 
 
 class LoggingSettings(_Model):

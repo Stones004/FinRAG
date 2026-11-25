@@ -83,7 +83,7 @@ def test_version_1_database_is_upgraded_in_place() -> None:
     assert {"dimensions_json", "statement_type"} <= columns
     with transaction() as conn:
         version = conn.execute(sa.select(sa.func.max(tables.schema_version.c.version))).scalar()
-        assert version == SCHEMA_VERSION == 6
+        assert version == SCHEMA_VERSION == 7
         row = conn.execute(sa.select(tables.parsed_facts)).one()
     assert (row.filing_id, row.concept_raw, row.value, row.dimensions_json, row.statement_type) == (
         "FIL-x",

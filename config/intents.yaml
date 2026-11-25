@@ -72,6 +72,10 @@ trend_words: ["trend", "over the last"]
 # "growth" with a metric that has a year-on-year growth metric reads as that metric ("HDFC loans growth").
 # A word that is not a growth metric's own synonym ("loans", "revenue") would otherwise win on its own.
 growth_words: ["growth", "grew", "growing"]
+# Words that say a figure moved. With one of them in the question, the year-on-year growth metric of each
+# asked metric is shown beside it as context (metrics.yaml `growth_companion`, or growth_counterparts below
+# for a taxonomy concept); a metric with neither gets nothing added.
+change_words: ["jump", "jumped", "surge", "surged", "rise", "rose", "risen", "increase", "increased", "fall", "fell", "fallen", "drop", "dropped", "decline", "declined", "grew", "growth", "go up", "went up", "go down", "went down"]
 growth_counterparts:      # concept or metric -> its year-on-year growth metric
   revenue: revenue_growth_yoy
   profit_after_tax: pat_growth_yoy

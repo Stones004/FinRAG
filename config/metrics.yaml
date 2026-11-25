@@ -21,6 +21,9 @@
 #   the company's default basis. Bank operating metrics prefer standalone: consolidated operating
 #   expenses include the insurance and other subsidiaries (HDFC Bank FY26 cost to income: 38.00 %
 #   standalone, 58.45 % consolidated).
+# growth_companion: <metric id>  the year-on-year growth metric shown beside this one when the question
+#   uses a change word (intents.change_words); omit = nothing is added. Concepts (revenue, profit) name
+#   their growth metric in intents.growth_counterparts.
 # Quarterly cash flow generally does not exist (MASTER_BUILD 8.5), so cash-flow metrics are H and FY.
 version: 1
 
@@ -79,6 +82,7 @@ metrics:
     display: percent
     period_types: [Q, H, 9M, FY]
     sectors: [general]
+    growth_companion: operating_margin_change_yoy
     assumptions: ["Operating profit as defined by metric operating_profit."]
     limitations: ["Not comparable across a corporate event."]
 

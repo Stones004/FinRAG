@@ -202,6 +202,7 @@ query:
     require_citation_per_sentence: true
     numeric_check_enabled: true
     show_lead_ins: false               # false: the answer shows the source label and the stored sentence only; true: the model may add a short, checked lead-in
+    event_covered_rules: [xbrl_vs_pdf] # a warning of these validation rules is not repeated when a recorded event the metric straddles explains it (the "Not like for like" block already says so)
     min_quote_chars: 20                # a claim's quote must be at least this long (a word cannot prove a claim)
 
 llm:
@@ -233,6 +234,11 @@ ui:
   show_blocked_metrics: true           # show greyed with reason
   show_interpretation: true            # always show parsed intent above answers
   default_years_shown: 5
+  page_title: FinRAG
+  server_address: localhost            # `finrag ui` serves on this address only
+  port: 8501
+  embedder_warmup_text: warm up        # embedded once per app process (st.cache_resource) so each question reuses the loaded weights
+  feedback_note_max_chars: 2000        # longer notes are cut before they are stored
 
 logging:
   json_logs: true

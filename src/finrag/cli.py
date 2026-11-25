@@ -68,6 +68,37 @@ def config_show() -> None:
 
 
 @app.command()
+def ui() -> None:
+    """Start the Streamlit app on the address and port from settings.ui."""
+    import importlib.util
+    import subprocess
+    import sys
+
+    spec = importlib.util.find_spec(
+        "finrag.app.main"
+    )  # found, not imported: importing runs the app
+    assert spec is not None and spec.origin is not None
+    settings = _load_settings()
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        spec.origin,
+        "--server.address",
+        settings.ui.server_address,
+        "--server.port",
+        str(settings.ui.port),
+        "--server.headless",  # no first-run e-mail prompt; the address is printed below
+        "true",
+        "--browser.gatherUsageStats",
+        "false",
+    ]
+    typer.echo(f"FinRAG: http://{settings.ui.server_address}:{settings.ui.port}")
+    raise typer.Exit(code=subprocess.call(command))
+
+
+@app.command()
 def status() -> None:
     """Per-company health (placeholder; filled in by later modules)."""
     _load_settings()

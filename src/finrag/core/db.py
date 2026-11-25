@@ -14,10 +14,10 @@ from sqlalchemy.engine import Connection, Engine
 from finrag.core.config import get_settings
 from finrag.core.types import utc_now_iso
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Upgrade steps from version N to N+1: plain SQL run once on an existing database
-# (M03: v2, v3; M05: v4; M07: v5; M08: v6).
+# (M03: v2, v3; M05: v4; M07: v5; M08: v6; M11: v7).
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     1: ("ALTER TABLE parsed_facts ADD COLUMN dimensions_json TEXT",),
     2: ("ALTER TABLE parsed_facts ADD COLUMN statement_type TEXT",),
@@ -31,6 +31,7 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE chunks ADD COLUMN period_type TEXT",
         "ALTER TABLE chunks ADD COLUMN meta_json TEXT",
     ),
+    6: (),  # v7 adds the feedback table only; metadata.create_all creates it
 }
 
 metadata = sa.MetaData()
@@ -272,6 +273,16 @@ _table(
     _text("cited_ids_json"),
     _text("postcheck_json"),
     _text("user_feedback"),
+    _text("created_at"),
+)
+_table(
+    "feedback",  # M11: "this answer is wrong" from the UI
+    _id_pk(),
+    _text("query_id"),  # the query_log row, when the answer has one
+    _text("question"),
+    _text("answer"),
+    _text("intent_json"),
+    _text("note"),
     _text("created_at"),
 )
 _table(

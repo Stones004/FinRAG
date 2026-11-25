@@ -102,6 +102,9 @@ class MetricDef(_Model):
     # the basis a reader should see first (M09 says which basis it used and offers the other);
     # both bases are always computed. Omitted = the company's default basis
     preferred_basis: Literal["consolidated", "standalone"] | None = None
+    # the year-on-year growth metric shown beside this one when the question uses a change word
+    # ("why did margin fall"); omitted = nothing is added
+    growth_companion: str | None = None
     # inputs that are balances also look at the opening balance's validation results
     include_opening: bool = False
 
@@ -142,6 +145,7 @@ class Metric:
     helper: bool
     include_opening: bool
     preferred_basis: str | None
+    growth_companion: str | None = None
 
     @property
     def is_instant(self) -> bool:
@@ -208,6 +212,7 @@ class MetricRegistry:
             "limitations": list(m.limitations),
             "helper": m.helper,
             "preferred_basis": m.preferred_basis,
+            "growth_companion": m.growth_companion,
         }
 
 
@@ -295,6 +300,11 @@ def _check_metric(
     """Validate one metric; return its compiled formula (None if the formula is invalid)."""
     if not _ID.match(metric_id):
         problems.append(f"metric id '{metric_id}' must be lower-case words joined by underscores")
+    companion = definition.growth_companion
+    if companion is not None and (companion == metric_id or companion not in raw.metrics):
+        problems.append(
+            f"metric '{metric_id}': growth_companion '{companion}' is not another metric"
+        )
     for alias in definition.inputs:
         if not _ALIAS.match(alias) or alias in ("avg", "abs", "min", "max"):
             problems.append(f"metric '{metric_id}': '{alias}' is not a usable input alias")
@@ -397,6 +407,7 @@ def parse_registry(data: dict[str, Any], taxonomy: Taxonomy | None = None) -> Me
             helper=d.helper,
             include_opening=d.include_opening,
             preferred_basis=d.preferred_basis,
+            growth_companion=d.growth_companion,
         )
         for mid, d in raw.metrics.items()
     }

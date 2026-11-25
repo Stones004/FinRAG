@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+venv/
+.env
+*.pem
+ask_check.txt

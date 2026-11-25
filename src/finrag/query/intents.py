@@ -67,6 +67,7 @@ class Intents(_Model):
     unavailable_sections: list[str] = Field(default_factory=list)
     topical_section_hints: list[str] = Field(default_factory=list)
     companions: dict[str, list[str]] = Field(default_factory=dict)
+    change_words: list[str] = Field(default_factory=list)
     unavailable_names: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
